@@ -249,35 +249,7 @@ fn parseBeginNode(allocator: *mem.Allocator, parser: *Parser, address_cells_in: 
                 const prop = parser.object(FDTProp);
                 const prop_name = parser.cstringFromSectionOffset(prop.nameoff);
                 const prop_value = parser.buffer(prop.len);
-                if (std.mem.eql(u8, prop_name, "#address-cells")) {
-                    address_cells = std.mem.bigToNative(u32, propertyValue("#address-cells", prop_value));
-                    try props.append(Prop{ .AddressCells = address_cells.? });
-                } else if (std.mem.eql(u8, prop_name, "#size-cells")) {
-                    size_cells = std.mem.bigToNative(u32, propertyValue("#size-cells", prop_value));
-                    try props.append(Prop{ .SizeCells = size_cells.? });
-                } else if (std.mem.eql(u8, prop_name, "reg")) {
-                    if (address_cells == null or size_cells == null) {
-                        return error.MissingCells;
-                    }
-                    if (address_cells.? > 2 or size_cells.? > 2) {
-                        return error.UnsupportedCells;
-                    }
-                    const pair_size = (address_cells.? + size_cells.?) * @sizeOf(u32);
-                    if (prop_value.len % pair_size != 0) {
-                        return error.BadStructure;
-                    }
-
-                    var pairs: [][2]u64 = try allocator.alloc([2]u64, prop_value.len / pair_size);
-                    var off: usize = 0;
-                    while (off < prop_value.len) {
-                        off += address_cells.? * @sizeOf(u32);
-                        off += size_cells.? * @sizeOf(u32);
-                    }
-
-                    try props.append(Prop{ .Reg = pairs });
-                } else {
-                    try props.append(Prop{ .Unknown = .{ .name = prop_name, .value = prop_value } });
-                }
+                try props.append(try parseProp(allocator, prop_name, prop_value, &address_cells, &size_cells));
                 parser.alignTo(u32);
             },
             .Nop => {},
@@ -292,6 +264,40 @@ fn parseBeginNode(allocator: *mem.Allocator, parser: *Parser, address_cells_in: 
         .props = props.toOwnedSlice(),
         .children = children.toOwnedSlice(),
     };
+}
+
+fn parseProp(allocator: *mem.Allocator, name: []const u8, value: []const u8, address_cells: *?u32, size_cells: *?u32) Error!Prop {
+    if (std.mem.eql(u8, name, "#address-cells")) {
+        const v = std.mem.bigToNative(u32, propertyValue("#address-cells", value));
+        address_cells.* = v;
+        return Prop{ .AddressCells = v };
+    } else if (std.mem.eql(u8, name, "#size-cells")) {
+        const v = std.mem.bigToNative(u32, propertyValue("#size-cells", value));
+        size_cells.* = v;
+        return Prop{ .SizeCells = v };
+    } else if (std.mem.eql(u8, name, "reg")) {
+        if (address_cells.* == null or size_cells.* == null) {
+            return error.MissingCells;
+        }
+        if (address_cells.*.? > 2 or size_cells.*.? > 2) {
+            return error.UnsupportedCells;
+        }
+        const pair_size = (address_cells.*.? + size_cells.*.?) * @sizeOf(u32);
+        if (value.len % pair_size != 0) {
+            return error.BadStructure;
+        }
+
+        var pairs: [][2]u64 = try allocator.alloc([2]u64, value.len / pair_size);
+        var off: usize = 0;
+        while (off < value.len) {
+            off += address_cells.*.? * @sizeOf(u32);
+            off += size_cells.*.? * @sizeOf(u32);
+        }
+
+        return Prop{ .Reg = pairs };
+    } else {
+        return Prop{ .Unknown = .{ .name = name, .value = value } };
+    }
 }
 
 const qemu_dtb = @embedFile("../qemu.dtb");
