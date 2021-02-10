@@ -1,84 +1,13 @@
 const std = @import("std");
-const mem = std.mem;
 const testing = std.testing;
-
-const FDTHeader = packed struct {
-    magic: u32,
-    totalsize: u32,
-    off_dt_struct: u32,
-    off_dt_strings: u32,
-    off_mem_rsvmap: u32,
-    version: u32,
-    last_comp_version: u32,
-    boot_cpuid_phys: u32,
-    size_dt_strings: u32,
-    size_dt_struct: u32,
-};
-
-const FDTReserveEntry = packed struct {
-    address: u64,
-    size: u64,
-};
-
-const FDTToken = packed enum(u32) {
-    BeginNode = 0x00000001,
-    EndNode = 0x00000002,
-    Prop = 0x00000003,
-    Nop = 0x00000004,
-    End = 0x00000009,
-};
-
-const FDTProp = packed struct {
-    len: u32,
-    nameoff: u32,
-};
-
-pub const Error = mem.Allocator.Error || error{
-    Truncated,
-    BadMagic,
-    UnsupportedVersion,
-    BadStructure,
-    MissingCells,
-    UnsupportedCells,
-};
-
-const PropertyTypeMapping = struct {
-    property_name: []const u8,
-    property_type: type,
-};
-const PROPERTY_TYPE_MAPPINGS: [2]PropertyTypeMapping = .{
-    .{ .property_name = "#address-cells", .property_type = u32 },
-    .{ .property_name = "#size-cells", .property_type = u32 },
-};
-
-fn PropertyType(comptime property_name: []const u8) type {
-    inline for (PROPERTY_TYPE_MAPPINGS) |mapping| {
-        if (comptime std.mem.eql(u8, property_name, mapping.property_name)) {
-            return mapping.property_type;
-        }
-    }
-    @compileError("unknown property \"" ++ property_name ++ "\"");
-}
-
-fn propertyValue(comptime property_name: []const u8, value: []const u8) PropertyType(property_name) {
-    const t = PropertyType(property_name);
-    return @ptrCast(*const t, @alignCast(@alignOf(t), value.ptr)).*;
-}
-
-fn bigToNative(comptime T: type, s: T) T {
-    var r = s;
-    inline for (std.meta.fields(T)) |field| {
-        @field(r, field.name) = std.mem.bigToNative(field.field_type, @field(r, field.name));
-    }
-    return r;
-}
+const parser = @import("parser.zig");
 
 pub const Node = struct {
     name: []const u8,
     props: []Prop,
     children: []Node,
 
-    pub fn deinit(node: Node, allocator: *mem.Allocator) void {
+    pub fn deinit(node: Node, allocator: *std.mem.Allocator) void {
         for (node.props) |prop| {
             prop.deinit(allocator);
         }
@@ -137,7 +66,7 @@ pub const Prop = union(enum) {
         }
     }
 
-    pub fn deinit(prop: Prop, allocator: *mem.Allocator) void {
+    pub fn deinit(prop: Prop, allocator: *std.mem.Allocator) void {
         switch (prop) {
             .Reg => |v| allocator.free(v),
             else => {},
@@ -150,155 +79,8 @@ pub const PropUnknown = struct {
     value: []const u8,
 };
 
-const Parser = struct {
-    fdt: []const u8,
-    header: FDTHeader,
-    offset: usize,
-
-    fn aligned(parser: *@This(), comptime T: type) T {
-        const size = @sizeOf(T);
-        const value = @ptrCast(*const T, @alignCast(@alignOf(T), parser.fdt[parser.offset .. parser.offset + size])).*;
-        parser.offset += size;
-        return value;
-    }
-
-    fn buffer(parser: *@This(), length: usize) []const u8 {
-        const value = parser.fdt[parser.offset .. parser.offset + length];
-        parser.offset += length;
-        return value;
-    }
-
-    fn token(parser: *@This()) FDTToken {
-        return @intToEnum(FDTToken, std.mem.bigToNative(u32, parser.aligned(u32)));
-    }
-
-    fn object(parser: *@This(), comptime T: type) T {
-        return bigToNative(T, parser.aligned(T));
-    }
-
-    fn cstring(parser: *@This()) []const u8 {
-        const length = std.mem.lenZ(@ptrCast([*c]const u8, parser.fdt[parser.offset..]));
-        const value = parser.fdt[parser.offset .. parser.offset + length];
-        parser.offset += length + 1;
-        return value;
-    }
-
-    fn cstringFromSectionOffset(parser: @This(), offset: usize) []const u8 {
-        const length = std.mem.lenZ(@ptrCast([*c]const u8, parser.fdt[parser.header.off_dt_strings + offset ..]));
-        return parser.fdt[parser.header.off_dt_strings + offset ..][0..length];
-    }
-
-    fn alignTo(parser: *@This(), comptime T: type) void {
-        parser.offset += @sizeOf(T) - 1;
-        parser.offset &= ~@as(usize, @sizeOf(T) - 1);
-    }
-};
-
-pub fn parse(allocator: *mem.Allocator, fdt: []const u8) Error!Node {
-    if (fdt.len < @sizeOf(FDTHeader)) {
-        return error.Truncated;
-    }
-    const header = bigToNative(FDTHeader, @ptrCast(*const FDTHeader, fdt.ptr).*);
-    if (header.magic != 0xd00dfeed) {
-        return error.BadMagic;
-    }
-    if (fdt.len < header.totalsize) {
-        return error.Truncated;
-    }
-    if (header.version != 17) {
-        return error.UnsupportedVersion;
-    }
-
-    var parser = Parser{ .fdt = fdt, .header = header, .offset = header.off_dt_struct };
-    if (parser.token() != .BeginNode) {
-        return error.BadStructure;
-    }
-
-    var root = try parseBeginNode(allocator, &parser, null, null);
-
-    if (parser.token() != .End) {
-        return error.BadStructure;
-    }
-    if (parser.offset != header.off_dt_struct + header.size_dt_struct) {
-        return error.BadStructure;
-    }
-
-    return root;
-}
-
-fn parseBeginNode(allocator: *mem.Allocator, parser: *Parser, address_cells_in: ?u32, size_cells_in: ?u32) Error!Node {
-    const node_name = parser.cstring();
-    parser.alignTo(u32);
-
-    var address_cells = address_cells_in;
-    var size_cells = size_cells_in;
-
-    var props = std.ArrayList(Prop).init(allocator);
-    var children = std.ArrayList(Node).init(allocator);
-
-    loop: while (true) {
-        switch (parser.token()) {
-            .BeginNode => {
-                var subnode = try parseBeginNode(allocator, parser, address_cells, size_cells);
-                try children.append(subnode);
-            },
-            .EndNode => {
-                break :loop;
-            },
-            .Prop => {
-                const prop = parser.object(FDTProp);
-                const prop_name = parser.cstringFromSectionOffset(prop.nameoff);
-                const prop_value = parser.buffer(prop.len);
-                try props.append(try parseProp(allocator, prop_name, prop_value, &address_cells, &size_cells));
-                parser.alignTo(u32);
-            },
-            .Nop => {},
-            .End => {
-                return error.BadStructure;
-            },
-        }
-    }
-
-    return Node{
-        .name = node_name,
-        .props = props.toOwnedSlice(),
-        .children = children.toOwnedSlice(),
-    };
-}
-
-fn parseProp(allocator: *mem.Allocator, name: []const u8, value: []const u8, address_cells: *?u32, size_cells: *?u32) Error!Prop {
-    if (std.mem.eql(u8, name, "#address-cells")) {
-        const v = std.mem.bigToNative(u32, propertyValue("#address-cells", value));
-        address_cells.* = v;
-        return Prop{ .AddressCells = v };
-    } else if (std.mem.eql(u8, name, "#size-cells")) {
-        const v = std.mem.bigToNative(u32, propertyValue("#size-cells", value));
-        size_cells.* = v;
-        return Prop{ .SizeCells = v };
-    } else if (std.mem.eql(u8, name, "reg")) {
-        if (address_cells.* == null or size_cells.* == null) {
-            return error.MissingCells;
-        }
-        if (address_cells.*.? > 2 or size_cells.*.? > 2) {
-            return error.UnsupportedCells;
-        }
-        const pair_size = (address_cells.*.? + size_cells.*.?) * @sizeOf(u32);
-        if (value.len % pair_size != 0) {
-            return error.BadStructure;
-        }
-
-        var pairs: [][2]u64 = try allocator.alloc([2]u64, value.len / pair_size);
-        var off: usize = 0;
-        while (off < value.len) {
-            off += address_cells.*.? * @sizeOf(u32);
-            off += size_cells.*.? * @sizeOf(u32);
-        }
-
-        return Prop{ .Reg = pairs };
-    } else {
-        return Prop{ .Unknown = .{ .name = name, .value = value } };
-    }
-}
+pub const parse = parser.parse;
+pub const Error = parser.Error;
 
 const qemu_dtb = @embedFile("../qemu.dtb");
 const rockpro64_dtb = @embedFile("../rk3399-rockpro64.dtb");
