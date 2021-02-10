@@ -7,13 +7,40 @@ pub const Node = struct {
     props: []Prop,
     children: []Node,
 
+    pub fn propAt(start: Node, path: []const []const u8, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
+        var node: Node = start;
+        var i: usize = 0;
+        while (i < path.len) : (i += 1) {
+            node = node.child(path[i]) orelse return null;
+        }
+        return node.prop(prop_tag);
+    }
+
+    pub fn child(node: Node, child_name: []const u8) ?Node {
+        for (node.children) |c| {
+            if (std.mem.eql(u8, child_name, c.name)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    pub fn prop(node: Node, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
+        for (node.props) |p| {
+            if (p == prop_tag) {
+                return @field(p, @tagName(prop_tag));
+            }
+        }
+        return null;
+    }
+
     pub fn deinit(node: Node, allocator: *std.mem.Allocator) void {
-        for (node.props) |prop| {
-            prop.deinit(allocator);
+        for (node.props) |p| {
+            p.deinit(allocator);
         }
         allocator.free(node.props);
-        for (node.children) |child| {
-            child.deinit(allocator);
+        for (node.children) |c| {
+            c.deinit(allocator);
         }
         allocator.free(node.children);
     }
@@ -86,15 +113,13 @@ const qemu_dtb = @embedFile("../qemu.dtb");
 const rockpro64_dtb = @embedFile("../rk3399-rockpro64.dtb");
 
 test "parse" {
-    var dtb = try parse(std.testing.allocator, qemu_dtb);
-    std.debug.print("====\nqemu\n====\n{}\n\n", .{dtb});
-    dtb.deinit(std.testing.allocator);
+    var qemu = try parse(std.testing.allocator, qemu_dtb);
+    defer qemu.deinit(std.testing.allocator);
 
-    dtb = try parse(std.testing.allocator, rockpro64_dtb);
-    std.debug.print("=========\nrockpro64\n=========\n{}\n\n", .{dtb});
-    dtb.deinit(std.testing.allocator);
-    // QEMU places memory at 1GiB.
-    // testing.expectEqual(@as(u64, 0x40000000), try parseAndGetMemoryOffset(qemu_dtb));
-    // Rockpro64 at ?
-    // testing.expectEqual(@as(u64, 123), try parseAndGetMemoryOffset(rockpro64_dtb));
+    // This QEMU DTB places 512MiB of memory at 1GiB.
+    const prop = qemu.propAt(&.{"memory@40000000"}, .Reg);
+    testing.expectEqualSlices([2]u64, &[_][2]u64{.{ 1024 * 1024 * 1024, 512 * 1024 * 1024 }}, prop.?);
+
+    var rockpro64 = try parse(std.testing.allocator, rockpro64_dtb);
+    defer rockpro64.deinit(std.testing.allocator);
 }

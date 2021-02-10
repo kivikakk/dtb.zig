@@ -214,6 +214,7 @@ const NodeContext = struct {
             if (context.address_cells == null or context.size_cells == null) {
                 return error.MissingCells;
             }
+            // Limit each to u64.
             if (context.address_cells.? > 2 or context.size_cells.? > 2) {
                 return error.UnsupportedCells;
             }
@@ -222,11 +223,28 @@ const NodeContext = struct {
                 return error.BadStructure;
             }
 
+            var cells = @ptrCast([*]const u32, @alignCast(@alignOf(u32), value))[0 .. value.len / @sizeOf(u32)];
+
             var pairs: [][2]u64 = try context.allocator.alloc([2]u64, value.len / pair_size);
-            var off: usize = 0;
-            while (off < value.len) {
-                off += context.address_cells.? * @sizeOf(u32);
-                off += context.size_cells.? * @sizeOf(u32);
+            var pair_i: usize = 0;
+
+            var cell_i: usize = 0;
+            while (cell_i < cells.len) : (pair_i += 1) {
+                var j: usize = undefined;
+
+                pairs[pair_i][0] = 0;
+                j = 0;
+                while (j < context.address_cells.?) : (j += 1) {
+                    pairs[pair_i][0] = (pairs[pair_i][0] << 32) | std.mem.bigToNative(u32, cells[cell_i]);
+                    cell_i += 1;
+                }
+
+                pairs[pair_i][1] = 0;
+                j = 0;
+                while (j < context.size_cells.?) : (j += 1) {
+                    pairs[pair_i][1] = (pairs[pair_i][1] << 32) | std.mem.bigToNative(u32, cells[cell_i]);
+                    cell_i += 1;
+                }
             }
 
             return dtb.Prop{ .Reg = pairs };
