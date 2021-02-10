@@ -73,6 +73,7 @@ pub const Prop = union(enum) {
     AddressCells: u32,
     SizeCells: u32,
     Reg: [][2]u64,
+    Compatible: [][]const u8,
     Unknown: PropUnknown,
 
     pub fn format(prop: Prop, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -89,6 +90,17 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeByte('>');
             },
+            .Compatible => |v| {
+                // Same format as dtc -O dts.
+                try writer.writeAll("\"");
+                for (v) |s, i| {
+                    if (i != 0) {
+                        try writer.writeAll("\\0");
+                    }
+                    try writer.writeAll(s);
+                }
+                try writer.writeAll("\"");
+            },
             .Unknown => |v| try std.fmt.format(writer, "{s}: {}", .{ v.name, v.value }),
         }
     }
@@ -96,6 +108,7 @@ pub const Prop = union(enum) {
     pub fn deinit(prop: Prop, allocator: *std.mem.Allocator) void {
         switch (prop) {
             .Reg => |v| allocator.free(v),
+            .Compatible => |v| allocator.free(v),
             else => {},
         }
     }
@@ -117,8 +130,16 @@ test "parse" {
     defer qemu.deinit(std.testing.allocator);
 
     // This QEMU DTB places 512MiB of memory at 1GiB.
-    const prop = qemu.propAt(&.{"memory@40000000"}, .Reg);
-    testing.expectEqualSlices([2]u64, &[_][2]u64{.{ 1024 * 1024 * 1024, 512 * 1024 * 1024 }}, prop.?);
+    testing.expectEqualSlices(
+        [2]u64,
+        &[_][2]u64{.{ 1024 * 1024 * 1024, 512 * 1024 * 1024 }},
+        qemu.propAt(&.{"memory@40000000"}, .Reg).?,
+    );
+
+    // It has an A53-compatible CPU.
+    const compatible = qemu.propAt(&.{ "cpus", "cpu@0" }, .Compatible).?;
+    testing.expectEqual(@as(usize, 1), compatible.len);
+    testing.expectEqualStrings("arm,cortex-a53", compatible[0]);
 
     var rockpro64 = try parse(std.testing.allocator, rockpro64_dtb);
     defer rockpro64.deinit(std.testing.allocator);

@@ -248,6 +248,17 @@ const NodeContext = struct {
             }
 
             return dtb.Prop{ .Reg = pairs };
+        } else if (std.mem.eql(u8, name, "compatible")) {
+            const count = std.mem.count(u8, value, "\x00");
+            var strings = try context.allocator.alloc([]const u8, count);
+            var offset: usize = 0;
+            var strings_i: usize = 0;
+            while (offset < value.len) : (strings_i += 1) {
+                const len = std.mem.lenZ(@ptrCast([*c]const u8, value[offset..]));
+                strings[strings_i] = value[offset .. offset + len];
+                offset += len + 1;
+            }
+            return dtb.Prop{ .Compatible = strings };
         } else {
             return dtb.Prop{ .Unknown = .{ .name = name, .value = value } };
         }
