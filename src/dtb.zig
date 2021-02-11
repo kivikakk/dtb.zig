@@ -126,12 +126,15 @@ pub const Prop = union(enum) {
     PHandle: u32,
     InterruptParent: u32,
     Reg: [][2]u64,
+    Ranges: [][3]u64,
     Compatible: [][]const u8,
     Status: PropStatus,
     Interrupts: [][]u32,
     Clocks: [][]u32,
     ClockNames: [][]const u8,
     ClockOutputNames: [][]const u8,
+    ClockFrequency: u64,
+    InterruptNames: [][]const u8,
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
@@ -149,6 +152,16 @@ pub const Prop = union(enum) {
                         try writer.writeAll(">, <");
                     }
                     try std.fmt.format(writer, "0x{x:0>2} 0x{x:0>2}", .{ pair[0], pair[1] });
+                }
+                try writer.writeByte('>');
+            },
+            .Ranges => |v| {
+                try writer.writeAll("ranges: <");
+                for (v) |triple, i| {
+                    if (i != 0) {
+                        try writer.writeAll(">, <");
+                    }
+                    try std.fmt.format(writer, "0x{x:0>2} 0x{x:0>2} 0x{x:0>2}", .{ triple[0], triple[1], triple[2] });
                 }
                 try writer.writeByte('>');
             },
@@ -188,6 +201,8 @@ pub const Prop = union(enum) {
             },
             .ClockNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-names: ", writer),
             .ClockOutputNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-output-names: ", writer),
+            .ClockFrequency => |v| try std.fmt.format(writer, "clock-frequency: {}Hz", .{v}),
+            .InterruptNames => |v| try (StringListFormatter{ .string_list = v }).write("interrupt-names: ", writer),
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
@@ -217,14 +232,35 @@ pub const Prop = union(enum) {
     pub fn deinit(prop: Prop, allocator: *std.mem.Allocator) void {
         switch (prop) {
             .Reg => |v| allocator.free(v),
-            .Compatible, .ClockNames, .ClockOutputNames => |v| allocator.free(v),
-            .Interrupts, .Clocks => |groups| {
+            .Ranges => |v| allocator.free(v),
+
+            .Compatible,
+            .ClockNames,
+            .ClockOutputNames,
+            .InterruptNames,
+            => |v| allocator.free(v),
+
+            .Interrupts,
+            .Clocks,
+            => |groups| {
                 for (groups) |group| {
                     allocator.free(group);
                 }
                 allocator.free(groups);
             },
-            .AddressCells, .SizeCells, .InterruptCells, .ClockCells, .RegShift, .PHandle, .InterruptParent, .Status, .Unresolved, .Unknown => {},
+
+            .AddressCells,
+            .SizeCells,
+            .InterruptCells,
+            .ClockCells,
+            .RegShift,
+            .PHandle,
+            .InterruptParent,
+            .Status,
+            .Unresolved,
+            .Unknown,
+            .ClockFrequency,
+            => {},
         }
     }
 };
