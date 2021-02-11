@@ -86,12 +86,12 @@ pub const Node = struct {
     fn formatNode(node: Node, writer: anytype, depth: usize) std.os.WriteError!void {
         try indent(writer, depth);
         try std.fmt.format(writer, "Node <{s}> ({} props, {} children)\n", .{ node.name, node.props.len, node.children.len });
-        for (node.props) |prop| {
+        for (node.props) |p| {
             try indent(writer, depth);
-            try std.fmt.format(writer, " {}\n", .{prop});
+            try std.fmt.format(writer, " {}\n", .{p});
         }
-        for (node.children) |child| {
-            try child.formatNode(writer, depth + 1);
+        for (node.children) |c| {
+            try c.formatNode(writer, depth + 1);
         }
     }
 
@@ -161,12 +161,23 @@ pub const Prop = union(enum) {
             .Status => |v| try std.fmt.format(writer, "status: \"{s}\"", .{v}),
             .PHandle => |v| try std.fmt.format(writer, "phandle: <0x{x:0>2}>", .{v}),
             .InterruptParent => |v| try std.fmt.format(writer, "interrupt-parent: <0x{x:0>2}>", .{v}),
-            .Interrupts => |v| {
+            .Interrupts => |groups| {
                 try writer.writeAll("interrupts: <");
-                try writer.writeAll("TODO>");
+                for (groups) |group, i| {
+                    if (i != 0) {
+                        try writer.writeAll(" ");
+                    }
+                    for (group) |item, j| {
+                        if (j != 0) {
+                            try writer.writeAll(" ");
+                        }
+                        try std.fmt.format(writer, "0x{x:0>2}", .{item});
+                    }
+                }
+                try writer.writeAll(">");
             },
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
-            .Unknown => |v| try std.fmt.format(writer, "{s}: {}", .{ v.name, v.value }),
+            .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ v.name, v.value.len, std.zig.fmtEscapes(v.value) }),
         }
     }
 
@@ -222,6 +233,8 @@ test "parse" {
     const interrupts = qemu.propAt(&.{"pl011@9000000"}, .Interrupts).?;
     testing.expectEqual(@as(usize, 1), interrupts.len);
     testing.expectEqualSlices(u32, &[_]u32{ 0x0, 0x01, 0x04 }, interrupts[0]);
+
+    std.debug.print("{}\n", .{qemu});
 
     var rockpro64 = try parse(std.testing.allocator, rockpro64_dtb);
     defer rockpro64.deinit(std.testing.allocator);
