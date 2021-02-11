@@ -85,10 +85,10 @@ pub const Node = struct {
 
     fn formatNode(node: Node, writer: anytype, depth: usize) std.os.WriteError!void {
         try indent(writer, depth);
-        try std.fmt.format(writer, "Node <{s}> ({} props, {} children)\n", .{ node.name, node.props.len, node.children.len });
+        try std.fmt.format(writer, "Node <{s}>\n", .{std.zig.fmtEscapes(node.name)});
         for (node.props) |p| {
-            try indent(writer, depth);
-            try std.fmt.format(writer, " {}\n", .{p});
+            try indent(writer, depth + 1);
+            try std.fmt.format(writer, "{}\n", .{p});
         }
         for (node.children) |c| {
             try c.formatNode(writer, depth + 1);
@@ -143,7 +143,7 @@ pub const Prop = union(enum) {
                     if (i != 0) {
                         try writer.writeByte(' ');
                     }
-                    try std.fmt.format(writer, "0x{x} 0x{x}", .{ pair[0], pair[1] });
+                    try std.fmt.format(writer, "0x{x:0>2} 0x{x:0>2}", .{ pair[0], pair[1] });
                 }
                 try writer.writeByte('>');
             },
@@ -177,7 +177,7 @@ pub const Prop = union(enum) {
                 try writer.writeAll(">");
             },
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
-            .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ v.name, v.value.len, std.zig.fmtEscapes(v.value) }),
+            .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
     }
 
