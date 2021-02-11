@@ -296,14 +296,12 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
         .Reg => |v| {
             const address_cells = (current.parent orelse return error.BadStructure).addressCells() orelse return error.MissingCells;
             const size_cells = (current.parent orelse return error.BadStructure).sizeCells() orelse return error.MissingCells;
-            std.debug.print("resolving Reg at node {s}\n", .{current.name});
             return dtb.Prop{ .Reg = try readArray(allocator, v, 2, [2]u32{ address_cells, size_cells }) };
         },
         .Ranges => |v| {
             const address_cells = current.addressCells() orelse return error.MissingCells;
             const parent_address_cells = (current.parent orelse return error.BadStructure).addressCells() orelse return error.MissingCells;
             const size_cells = current.sizeCells() orelse return error.MissingCells;
-            std.debug.print("resolving Ranges at node {s}\n", .{current.name});
             return dtb.Prop{ .Ranges = try readArray(allocator, v, 3, [3]u32{ address_cells, parent_address_cells, size_cells }) };
         },
         .Interrupts => |v| {
@@ -376,8 +374,6 @@ fn readArray(allocator: *std.mem.Allocator, value: []const u8, comptime elem_cou
     }
 
     if (big_endian_cells.len % elems_sum != 0) {
-        std.debug.print("big_endian_cells.len: {}, elems_sum: {}\n", .{ big_endian_cells.len, elems_sum });
-        std.debug.print("big_endian_cells: {any}, elems: {any}\n", .{ big_endian_cells, elems });
         return error.BadStructure;
     }
 
