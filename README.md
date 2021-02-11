@@ -46,9 +46,11 @@ testing.expectEqualSlices(u32, &.{0x8000}, clocks[0]);
 testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
 ```
 
-## Incomplete
+## notes, incomplete
 
 Still many prop types are just left unparsed. Please add them as you go! Merge requests happily accepted.
+
+Ranges are `u128`s because a PCIe bus has an `#address-cells` of 3? What's with that?
 
 ## LICENSE
 
