@@ -367,7 +367,7 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
                 const clock_cells = target.prop(.ClockCells) orelse return error.MissingCells;
                 var group = try allocator.alloc(u32, 1 + clock_cells);
                 errdefer allocator.free(group);
-                group[0] = clock_cells;
+                group[0] = phandle;
                 var item_i: usize = 0;
                 while (item_i < clock_cells) : (item_i += 1) {
                     group[item_i + 1] = std.mem.bigToNative(u32, big_endian_cells[cell_i]);

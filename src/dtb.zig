@@ -315,7 +315,7 @@ test "parse" {
         const clocks = serial.prop(.Clocks).?;
         testing.expectEqual(@as(usize, 2), clocks.len);
         testing.expectEqualSlices(u32, &.{ 0x85, 0x51 }, clocks[0]);
-        testing.expectEqualSlices(u32, &.{ 0x85, 0x6001 }, clocks[1]);
+        testing.expectEqualSlices(u32, &.{ 0x85, 0x160 }, clocks[1]);
 
         // Print it out.
         std.debug.print("{}\n", .{rockpro64});
