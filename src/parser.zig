@@ -210,6 +210,8 @@ const NodeContext = struct {
             return dtb.Prop{ .SizeCells = context.size_cells.? };
         } else if (std.mem.eql(u8, name, "#interrupt-cells")) {
             return dtb.Prop{ .InterruptCells = integer(u32, value) };
+        } else if (std.mem.eql(u8, name, "#clock-cells")) {
+            return dtb.Prop{ .ClockCells = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "reg-shift")) {
             return dtb.Prop{ .RegShift = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "reg")) {
