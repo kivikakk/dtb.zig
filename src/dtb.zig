@@ -69,17 +69,35 @@ pub const Node = struct {
     }
 };
 
+pub const PropStatus = enum {
+    Okay,
+    Disabled,
+    Fail,
+
+    pub fn format(status: PropStatus, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        switch (status) {
+            .Okay => try writer.writeAll("okay"),
+            .Disabled => try writer.writeAll("disabled"),
+            .Fail => try writer.writeAll("fail"),
+        }
+    }
+};
+
 pub const Prop = union(enum) {
     AddressCells: u32,
     SizeCells: u32,
+    RegShift: u32,
+    PHandle: u32,
     Reg: [][2]u64,
     Compatible: [][]const u8,
+    Status: PropStatus,
     Unknown: PropUnknown,
 
     pub fn format(prop: Prop, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         switch (prop) {
             .AddressCells => |v| try std.fmt.format(writer, "#address-cells: 0x{x:0>8}", .{v}),
             .SizeCells => |v| try std.fmt.format(writer, "#size-cells: 0x{x:0>8}", .{v}),
+            .RegShift => |v| try std.fmt.format(writer, "reg-shift: 0x{x:0>2}", .{v}),
             .Reg => |v| {
                 try writer.writeAll("reg: <");
                 for (v) |pair, i| {
@@ -101,6 +119,7 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeAll("\"");
             },
+            .Status => |v| try std.fmt.format(writer, "status: \"{s}\"", .{v}),
             .Unknown => |v| try std.fmt.format(writer, "{s}: {}", .{ v.name, v.value }),
         }
     }

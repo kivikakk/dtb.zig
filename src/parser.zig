@@ -34,30 +34,7 @@ const FDTProp = packed struct {
 
 // ---
 
-const PropertyTypeMapping = struct {
-    property_name: []const u8,
-    property_type: type,
-};
-const PROPERTY_TYPE_MAPPINGS: [2]PropertyTypeMapping = .{
-    .{ .property_name = "#address-cells", .property_type = u32 },
-    .{ .property_name = "#size-cells", .property_type = u32 },
-};
-
-fn PropertyType(comptime property_name: []const u8) type {
-    inline for (PROPERTY_TYPE_MAPPINGS) |mapping| {
-        if (comptime std.mem.eql(u8, property_name, mapping.property_name)) {
-            return mapping.property_type;
-        }
-    }
-    @compileError("unknown property \"" ++ property_name ++ "\"");
-}
-
-fn propertyValue(comptime property_name: []const u8, value: []const u8) PropertyType(property_name) {
-    const t = PropertyType(property_name);
-    return @ptrCast(*const t, @alignCast(@alignOf(t), value.ptr)).*;
-}
-
-fn bigToNative(comptime T: type, s: T) T {
+fn structBigToNative(comptime T: type, s: T) T {
     var r = s;
     inline for (std.meta.fields(T)) |field| {
         @field(r, field.name) = std.mem.bigToNative(field.field_type, @field(r, field.name));
@@ -74,13 +51,14 @@ pub const Error = std.mem.Allocator.Error || error{
     BadStructure,
     MissingCells,
     UnsupportedCells,
+    BadValue,
 };
 
 pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!dtb.Node {
     if (fdt.len < @sizeOf(FDTHeader)) {
         return error.Truncated;
     }
-    const header = bigToNative(FDTHeader, @ptrCast(*const FDTHeader, fdt.ptr).*);
+    const header = structBigToNative(FDTHeader, @ptrCast(*const FDTHeader, fdt.ptr).*);
     if (header.magic != 0xd00dfeed) {
         return error.BadMagic;
     }
@@ -132,7 +110,7 @@ const Parser = struct {
     }
 
     fn object(parser: *@This(), comptime T: type) T {
-        return bigToNative(T, parser.aligned(T));
+        return structBigToNative(T, parser.aligned(T));
     }
 
     fn cstring(parser: *@This()) []const u8 {
@@ -159,6 +137,17 @@ fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, address_cells:
 
     var props = std.ArrayList(dtb.Prop).init(allocator);
     var children = std.ArrayList(dtb.Node).init(allocator);
+
+    errdefer {
+        for (props.items) |p| {
+            p.deinit(allocator);
+        }
+        props.deinit();
+        for (children.items) |c| {
+            c.deinit(allocator);
+        }
+        children.deinit();
+    }
 
     // Node inherts #address/#size-cells from parent, but its own props may override those for
     // its children (and other props?).
@@ -205,62 +194,97 @@ const NodeContext = struct {
 
     fn prop(context: *@This(), name: []const u8, value: []const u8) Error!dtb.Prop {
         if (std.mem.eql(u8, name, "#address-cells")) {
-            context.address_cells = std.mem.bigToNative(u32, propertyValue("#address-cells", value));
+            context.address_cells = integer(u32, value);
             return dtb.Prop{ .AddressCells = context.address_cells.? };
         } else if (std.mem.eql(u8, name, "#size-cells")) {
-            context.size_cells = std.mem.bigToNative(u32, propertyValue("#size-cells", value));
+            context.size_cells = integer(u32, value);
             return dtb.Prop{ .SizeCells = context.size_cells.? };
+        } else if (std.mem.eql(u8, name, "reg-shift")) {
+            return dtb.Prop{ .RegShift = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "reg")) {
-            if (context.address_cells == null or context.size_cells == null) {
-                return error.MissingCells;
-            }
-            // Limit each to u64.
-            if (context.address_cells.? > 2 or context.size_cells.? > 2) {
-                return error.UnsupportedCells;
-            }
-            const pair_size = (context.address_cells.? + context.size_cells.?) * @sizeOf(u32);
-            if (value.len % pair_size != 0) {
-                return error.BadStructure;
-            }
-
-            var cells = @ptrCast([*]const u32, @alignCast(@alignOf(u32), value))[0 .. value.len / @sizeOf(u32)];
-
-            var pairs: [][2]u64 = try context.allocator.alloc([2]u64, value.len / pair_size);
-            var pair_i: usize = 0;
-
-            var cell_i: usize = 0;
-            while (cell_i < cells.len) : (pair_i += 1) {
-                var j: usize = undefined;
-
-                pairs[pair_i][0] = 0;
-                j = 0;
-                while (j < context.address_cells.?) : (j += 1) {
-                    pairs[pair_i][0] = (pairs[pair_i][0] << 32) | std.mem.bigToNative(u32, cells[cell_i]);
-                    cell_i += 1;
-                }
-
-                pairs[pair_i][1] = 0;
-                j = 0;
-                while (j < context.size_cells.?) : (j += 1) {
-                    pairs[pair_i][1] = (pairs[pair_i][1] << 32) | std.mem.bigToNative(u32, cells[cell_i]);
-                    cell_i += 1;
-                }
-            }
-
-            return dtb.Prop{ .Reg = pairs };
+            return dtb.Prop{ .Reg = try context.reg(value) };
+        } else if (std.mem.eql(u8, name, "status")) {
+            return dtb.Prop{ .Status = try status(value) };
+        } else if (std.mem.eql(u8, name, "phandle")) {
+            return dtb.Prop{ .PHandle = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "compatible")) {
-            const count = std.mem.count(u8, value, "\x00");
-            var strings = try context.allocator.alloc([]const u8, count);
-            var offset: usize = 0;
-            var strings_i: usize = 0;
-            while (offset < value.len) : (strings_i += 1) {
-                const len = std.mem.lenZ(@ptrCast([*c]const u8, value[offset..]));
-                strings[strings_i] = value[offset .. offset + len];
-                offset += len + 1;
-            }
-            return dtb.Prop{ .Compatible = strings };
+            return dtb.Prop{ .Compatible = try context.stringList(value) };
         } else {
             return dtb.Prop{ .Unknown = .{ .name = name, .value = value } };
         }
+    }
+
+    fn integer(comptime T: type, value: []const u8) T {
+        return std.mem.bigToNative(T, @ptrCast(*const T, @alignCast(@alignOf(T), value.ptr)).*);
+    }
+
+    fn stringList(context: @This(), value: []const u8) Error![][]const u8 {
+        const count = std.mem.count(u8, value, "\x00");
+        var strings = try context.allocator.alloc([]const u8, count);
+        errdefer context.allocator.free(strings);
+        var offset: usize = 0;
+        var strings_i: usize = 0;
+        while (offset < value.len) : (strings_i += 1) {
+            const len = std.mem.lenZ(@ptrCast([*c]const u8, value[offset..]));
+            strings[strings_i] = value[offset .. offset + len];
+            offset += len + 1;
+        }
+        return strings;
+    }
+
+    fn status(value: []const u8) Error!dtb.PropStatus {
+        if (std.mem.eql(u8, value, "okay\x00")) {
+            return dtb.PropStatus.Okay;
+        } else if (std.mem.eql(u8, value, "disabled\x00")) {
+            return dtb.PropStatus.Disabled;
+        } else if (std.mem.eql(u8, value, "fail\x00")) {
+            return dtb.PropStatus.Fail;
+        }
+        return error.BadValue;
+    }
+
+    fn cellsBigEndian(value: []const u8) []const u32 {
+        return @ptrCast([*]const u32, @alignCast(@alignOf(u32), value))[0 .. value.len / @sizeOf(u32)];
+    }
+
+    fn reg(context: *@This(), value: []const u8) Error![][2]u64 {
+        if (context.address_cells == null or context.size_cells == null) {
+            return error.MissingCells;
+        }
+        // Limit each to u64.
+        if (context.address_cells.? > 2 or context.size_cells.? > 2) {
+            return error.UnsupportedCells;
+        }
+
+        const pair_cells = context.address_cells.? + context.size_cells.?;
+        const big_endian_cells = cellsBigEndian(value);
+
+        if (big_endian_cells.len % pair_cells != 0) {
+            return error.BadStructure;
+        }
+
+        var pairs: [][2]u64 = try context.allocator.alloc([2]u64, big_endian_cells.len / pair_cells);
+        errdefer context.allocator.free(pairs);
+        var pair_i: usize = 0;
+
+        var cell_i: usize = 0;
+        while (cell_i < big_endian_cells.len) : (pair_i += 1) {
+            var j: usize = undefined;
+
+            pairs[pair_i][0] = 0;
+            j = 0;
+            while (j < context.address_cells.?) : (j += 1) {
+                pairs[pair_i][0] = (pairs[pair_i][0] << 32) | std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+                cell_i += 1;
+            }
+
+            pairs[pair_i][1] = 0;
+            j = 0;
+            while (j < context.size_cells.?) : (j += 1) {
+                pairs[pair_i][1] = (pairs[pair_i][1] << 32) | std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+                cell_i += 1;
+            }
+        }
+        return pairs;
     }
 };
