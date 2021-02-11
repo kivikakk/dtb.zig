@@ -131,6 +131,7 @@ pub const Prop = union(enum) {
     Interrupts: [][]u32,
     Clocks: [][]u32,
     ClockNames: [][]const u8,
+    ClockOutputNames: [][]const u8,
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
@@ -145,23 +146,13 @@ pub const Prop = union(enum) {
                 try writer.writeAll("reg: <");
                 for (v) |pair, i| {
                     if (i != 0) {
-                        try writer.writeByte(' ');
+                        try writer.writeAll(">, <");
                     }
                     try std.fmt.format(writer, "0x{x:0>2} 0x{x:0>2}", .{ pair[0], pair[1] });
                 }
                 try writer.writeByte('>');
             },
-            .Compatible => |v| {
-                // Same format as dtc -O dts.
-                try writer.writeAll("compatible: \"");
-                for (v) |s, i| {
-                    if (i != 0) {
-                        try writer.writeAll("\\0");
-                    }
-                    try writer.writeAll(s);
-                }
-                try writer.writeAll("\"");
-            },
+            .Compatible => |v| try (StringListFormatter{ .string_list = v }).write("compatible: ", writer),
             .Status => |v| try std.fmt.format(writer, "status: \"{s}\"", .{v}),
             .PHandle => |v| try std.fmt.format(writer, "phandle: <0x{x:0>2}>", .{v}),
             .InterruptParent => |v| try std.fmt.format(writer, "interrupt-parent: <0x{x:0>2}>", .{v}),
@@ -169,7 +160,7 @@ pub const Prop = union(enum) {
                 try writer.writeAll("interrupts: <");
                 for (groups) |group, i| {
                     if (i != 0) {
-                        try writer.writeAll(" ");
+                        try writer.writeAll(">, <");
                     }
                     for (group) |item, j| {
                         if (j != 0) {
@@ -184,7 +175,7 @@ pub const Prop = union(enum) {
                 try writer.writeAll("clocks: <");
                 for (groups) |group, i| {
                     if (i != 0) {
-                        try writer.writeAll(" ");
+                        try writer.writeAll(">, <");
                     }
                     for (group) |item, j| {
                         if (j != 0) {
@@ -195,32 +186,45 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeAll(">");
             },
-            .ClockNames => |v| {
-                try writer.writeAll("clock-names: \"");
-                for (v) |s, i| {
-                    if (i != 0) {
-                        try writer.writeAll("\\0");
-                    }
-                    try writer.writeAll(s);
-                }
-                try writer.writeAll("\"");
-            },
+            .ClockNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-names: ", writer),
+            .ClockOutputNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-output-names: ", writer),
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
     }
 
+    const StringListFormatter = struct {
+        string_list: [][]const u8,
+
+        // Exists to work around https://github.com/ziglang/zig/issues/7534.
+        pub fn write(this: @This(), comptime prefix: []const u8, writer: anytype) !void {
+            try writer.writeAll(prefix);
+            try this.format("", .{}, writer);
+        }
+
+        pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            try writer.writeByte('"');
+            for (this.string_list) |s, i| {
+                if (i != 0) {
+                    try writer.writeAll("\", \"");
+                }
+                try writer.writeAll(s);
+            }
+            try writer.writeByte('"');
+        }
+    };
+
     pub fn deinit(prop: Prop, allocator: *std.mem.Allocator) void {
         switch (prop) {
             .Reg => |v| allocator.free(v),
-            .Compatible, .ClockNames => |v| allocator.free(v),
+            .Compatible, .ClockNames, .ClockOutputNames => |v| allocator.free(v),
             .Interrupts, .Clocks => |groups| {
                 for (groups) |group| {
                     allocator.free(group);
                 }
                 allocator.free(groups);
             },
-            else => {},
+            .AddressCells, .SizeCells, .InterruptCells, .ClockCells, .RegShift, .PHandle, .InterruptParent, .Status, .Unresolved, .Unknown => {},
         }
     }
 };

@@ -226,6 +226,8 @@ const NodeContext = struct {
             return dtb.Prop{ .Compatible = try context.stringList(value) };
         } else if (std.mem.eql(u8, name, "clock-names")) {
             return dtb.Prop{ .ClockNames = try context.stringList(value) };
+        } else if (std.mem.eql(u8, name, "clock-output-names")) {
+            return dtb.Prop{ .ClockOutputNames = try context.stringList(value) };
         } else if (std.mem.eql(u8, name, "interrupts")) {
             return dtb.Prop{ .Unresolved = .{ .Interrupts = value } };
         } else if (std.mem.eql(u8, name, "clocks")) {
