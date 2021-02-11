@@ -74,7 +74,7 @@ pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
         return error.BadStructure;
     }
 
-    var root = try parseBeginNode(allocator, &parser, null, null, null);
+    var root = try parseBeginNode(allocator, &parser, null, null);
     errdefer root.deinit(allocator);
 
     if (parser.token() != .End) {
@@ -134,7 +134,7 @@ const Parser = struct {
     }
 };
 
-fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, root: ?*dtb.Node, parent: ?*dtb.Node, parent_context: ?*const NodeContext) Error!*dtb.Node {
+fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, root: ?*dtb.Node, parent: ?*dtb.Node) Error!*dtb.Node {
     const node_name = parser.cstring();
     parser.alignTo(u32);
 
@@ -155,19 +155,14 @@ fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, root: ?*dtb.No
     var node = try allocator.create(dtb.Node);
     errdefer allocator.destroy(node);
 
-    // Node inherts #address/#size-cells from parent, but its own props may override those for
-    // its children (and other props?).
     var context = NodeContext{
         .allocator = allocator,
-        .parent_context = parent_context,
-        .address_cells = if (parent_context) |pc| pc.address_cells else null,
-        .size_cells = if (parent_context) |pc| pc.size_cells else null,
     };
 
     while (true) {
         switch (parser.token()) {
             .BeginNode => {
-                var subnode = try parseBeginNode(allocator, parser, root orelse node, node, &context);
+                var subnode = try parseBeginNode(allocator, parser, root orelse node, node);
                 try children.append(subnode);
             },
             .EndNode => {
@@ -199,27 +194,18 @@ fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, root: ?*dtb.No
 
 const NodeContext = struct {
     allocator: *std.mem.Allocator,
-    parent_context: ?*const NodeContext,
-    address_cells: ?u32,
-    size_cells: ?u32,
 
     fn prop(context: *@This(), name: []const u8, value: []const u8) Error!dtb.Prop {
         if (std.mem.eql(u8, name, "#address-cells")) {
-            context.address_cells = try integer(u32, value);
-            return dtb.Prop{ .AddressCells = context.address_cells.? };
+            return dtb.Prop{ .AddressCells = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "#size-cells")) {
-            context.size_cells = try integer(u32, value);
-            return dtb.Prop{ .SizeCells = context.size_cells.? };
+            return dtb.Prop{ .SizeCells = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "#interrupt-cells")) {
             return dtb.Prop{ .InterruptCells = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "#clock-cells")) {
             return dtb.Prop{ .ClockCells = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "reg-shift")) {
             return dtb.Prop{ .RegShift = try integer(u32, value) };
-        } else if (std.mem.eql(u8, name, "reg")) {
-            return dtb.Prop{ .Reg = try context.reg(value) };
-        } else if (std.mem.eql(u8, name, "ranges")) {
-            return dtb.Prop{ .Ranges = try context.ranges(value) };
         } else if (std.mem.eql(u8, name, "status")) {
             return dtb.Prop{ .Status = try status(value) };
         } else if (std.mem.eql(u8, name, "phandle")) {
@@ -234,12 +220,16 @@ const NodeContext = struct {
             return dtb.Prop{ .ClockOutputNames = try context.stringList(value) };
         } else if (std.mem.eql(u8, name, "interrupt-names")) {
             return dtb.Prop{ .InterruptNames = try context.stringList(value) };
+        } else if (std.mem.eql(u8, name, "clock-frequency")) {
+            return dtb.Prop{ .ClockFrequency = try u32OrU64(value) };
+        } else if (std.mem.eql(u8, name, "reg")) {
+            return dtb.Prop{ .Unresolved = .{ .Reg = value } };
+        } else if (std.mem.eql(u8, name, "ranges")) {
+            return dtb.Prop{ .Unresolved = .{ .Ranges = value } };
         } else if (std.mem.eql(u8, name, "interrupts")) {
             return dtb.Prop{ .Unresolved = .{ .Interrupts = value } };
         } else if (std.mem.eql(u8, name, "clocks")) {
             return dtb.Prop{ .Unresolved = .{ .Clocks = value } };
-        } else if (std.mem.eql(u8, name, "clock-frequency")) {
-            return dtb.Prop{ .ClockFrequency = try u32OrU64(value) };
         } else {
             return dtb.Prop{ .Unknown = .{ .name = name, .value = value } };
         }
@@ -282,64 +272,6 @@ const NodeContext = struct {
         }
         return error.BadValue;
     }
-
-    fn reg(context: *@This(), value: []const u8) Error![][2]u64 {
-        if (context.address_cells == null or context.size_cells == null) {
-            return error.MissingCells;
-        }
-        return context.readArray(value, 2, [2]u32{ context.address_cells.?, context.size_cells.? });
-    }
-
-    fn ranges(context: *@This(), value: []const u8) Error![][3]u64 {
-        if (context.address_cells == null or context.size_cells == null) {
-            return error.MissingCells;
-        }
-        if (context.parent_context == null or context.parent_context.?.address_cells == null) {
-            return error.MissingCells;
-        }
-        return context.readArray(value, 3, [3]u32{
-            context.address_cells.?,
-            context.parent_context.?.address_cells.?,
-            context.size_cells.?,
-        });
-    }
-
-    fn readArray(context: *@This(), value: []const u8, comptime elem_count: usize, elems: [elem_count]u32) Error![][elem_count]u64 {
-        const big_endian_cells = try cellsBigEndian(value);
-        var elems_sum: usize = 0;
-        for (elems) |elem| {
-            if (elem > 2) {
-                // We return u64s, so limit to 2 cells.
-                return error.UnsupportedCells;
-            }
-            elems_sum += elem;
-        }
-
-        if (big_endian_cells.len % elems_sum != 0) {
-            std.debug.print("cell len is {}, elems sum is {}\n", .{ big_endian_cells.len, elems_sum });
-            std.debug.print("value is {s}, elems in {any}\n", .{ std.zig.fmtEscapes(value), elems });
-            return error.BadStructure;
-        }
-
-        var tuples: [][elem_count]u64 = try context.allocator.alloc([elem_count]u64, big_endian_cells.len / elems_sum);
-        errdefer context.allocator.free(tuples);
-        var tuple_i: usize = 0;
-
-        var cell_i: usize = 0;
-        while (cell_i < big_endian_cells.len) : (tuple_i += 1) {
-            var elem_i: usize = 0;
-            while (elem_i < elem_count) : (elem_i += 1) {
-                var j: usize = undefined;
-                tuples[tuple_i][elem_i] = 0;
-                j = 0;
-                while (j < elems[elem_i]) : (j += 1) {
-                    tuples[tuple_i][elem_i] = (tuples[tuple_i][elem_i] << 32) | std.mem.bigToNative(u32, big_endian_cells[cell_i]);
-                    cell_i += 1;
-                }
-            }
-        }
-        return tuples;
-    }
 };
 
 // ---
@@ -361,6 +293,19 @@ fn resolve(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node) E
 
 fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node, unres: dtb.PropUnresolved) !dtb.Prop {
     switch (unres) {
+        .Reg => |v| {
+            const address_cells = (current.parent orelse return error.BadStructure).addressCells() orelse return error.MissingCells;
+            const size_cells = (current.parent orelse return error.BadStructure).sizeCells() orelse return error.MissingCells;
+            std.debug.print("resolving Reg at node {s}\n", .{current.name});
+            return dtb.Prop{ .Reg = try readArray(allocator, v, 2, [2]u32{ address_cells, size_cells }) };
+        },
+        .Ranges => |v| {
+            const address_cells = current.addressCells() orelse return error.MissingCells;
+            const parent_address_cells = (current.parent orelse return error.BadStructure).addressCells() orelse return error.MissingCells;
+            const size_cells = current.sizeCells() orelse return error.MissingCells;
+            std.debug.print("resolving Ranges at node {s}\n", .{current.name});
+            return dtb.Prop{ .Ranges = try readArray(allocator, v, 3, [3]u32{ address_cells, parent_address_cells, size_cells }) };
+        },
         .Interrupts => |v| {
             const interrupt_cells = current.interruptCells() orelse return error.MissingCells;
             const big_endian_cells = try cellsBigEndian(v);
@@ -418,6 +363,43 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
 }
 
 // ---
+const READ_ARRAY_RETURN = u128;
+
+fn readArray(allocator: *std.mem.Allocator, value: []const u8, comptime elem_count: usize, elems: [elem_count]u32) Error![][elem_count]READ_ARRAY_RETURN {
+    const big_endian_cells = try cellsBigEndian(value);
+    var elems_sum: usize = 0;
+    for (elems) |elem| {
+        if (elem > (@sizeOf(READ_ARRAY_RETURN) / @sizeOf(u32))) {
+            return error.UnsupportedCells;
+        }
+        elems_sum += elem;
+    }
+
+    if (big_endian_cells.len % elems_sum != 0) {
+        std.debug.print("big_endian_cells.len: {}, elems_sum: {}\n", .{ big_endian_cells.len, elems_sum });
+        std.debug.print("big_endian_cells: {any}, elems: {any}\n", .{ big_endian_cells, elems });
+        return error.BadStructure;
+    }
+
+    var tuples: [][elem_count]READ_ARRAY_RETURN = try allocator.alloc([elem_count]READ_ARRAY_RETURN, big_endian_cells.len / elems_sum);
+    errdefer allocator.free(tuples);
+    var tuple_i: usize = 0;
+
+    var cell_i: usize = 0;
+    while (cell_i < big_endian_cells.len) : (tuple_i += 1) {
+        var elem_i: usize = 0;
+        while (elem_i < elem_count) : (elem_i += 1) {
+            var j: usize = undefined;
+            tuples[tuple_i][elem_i] = 0;
+            j = 0;
+            while (j < elems[elem_i]) : (j += 1) {
+                tuples[tuple_i][elem_i] = (tuples[tuple_i][elem_i] << 32) | std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+                cell_i += 1;
+            }
+        }
+    }
+    return tuples;
+}
 
 fn cellsBigEndian(value: []const u8) ![]const u32 {
     if (value.len % @sizeOf(u32) != 0) return error.BadStructure;

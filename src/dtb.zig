@@ -67,6 +67,14 @@ pub const Node = struct {
         return null;
     }
 
+    pub fn addressCells(node: *const Node) ?u32 {
+        return node.prop(.AddressCells) orelse (node.parent orelse return null).addressCells();
+    }
+
+    pub fn sizeCells(node: *const Node) ?u32 {
+        return node.prop(.SizeCells) orelse (node.parent orelse return null).sizeCells();
+    }
+
     pub fn deinit(node: *Node, allocator: *std.mem.Allocator) void {
         for (node.props) |p| {
             p.deinit(allocator);
@@ -125,8 +133,8 @@ pub const Prop = union(enum) {
     RegShift: u32,
     PHandle: u32,
     InterruptParent: u32,
-    Reg: [][2]u64,
-    Ranges: [][3]u64,
+    Reg: [][2]u128,
+    Ranges: [][3]u128,
     Compatible: [][]const u8,
     Status: PropStatus,
     Interrupts: [][]u32,
@@ -266,6 +274,8 @@ pub const Prop = union(enum) {
 };
 
 pub const PropUnresolved = union(enum) {
+    Reg: []const u8,
+    Ranges: []const u8,
     Interrupts: []const u8,
     Clocks: []const u8,
 };
@@ -288,7 +298,7 @@ test "parse" {
 
         // This QEMU DTB places 512MiB of memory at 1GiB.
         testing.expectEqualSlices(
-            [2]u64,
+            [2]u128,
             &.{.{ 1024 * 1024 * 1024, 512 * 1024 * 1024 }},
             qemu.propAt(&.{"memory@40000000"}, .Reg).?,
         );
@@ -329,7 +339,7 @@ test "parse" {
 
         // This ROCKPro64 DTB has a serial at 0xff180000.
         const serial = rockpro64.child("serial@ff180000").?;
-        testing.expectEqualSlices([2]u64, &.{.{ 0xff180000, 0x100 }}, serial.prop(.Reg).?);
+        testing.expectEqualSlices([2]u128, &.{.{ 0xff180000, 0x100 }}, serial.prop(.Reg).?);
         testing.expectEqual(PropStatus.Okay, serial.prop(.Status).?);
         testing.expectEqual(@as(u32, 2), serial.prop(.RegShift).?);
         testing.expectEqual(@as(u32, 0x2c), serial.prop(.PHandle).?);
