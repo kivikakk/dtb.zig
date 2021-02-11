@@ -174,6 +174,12 @@ pub const Prop = union(enum) {
         switch (prop) {
             .Reg => |v| allocator.free(v),
             .Compatible => |v| allocator.free(v),
+            .Interrupts => |groups| {
+                for (groups) |group| {
+                    allocator.free(group);
+                }
+                allocator.free(groups);
+            },
             else => {},
         }
     }

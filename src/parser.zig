@@ -258,10 +258,6 @@ const NodeContext = struct {
         return error.BadValue;
     }
 
-    fn cellsBigEndian(value: []const u8) []const u32 {
-        return @ptrCast([*]const u32, @alignCast(@alignOf(u32), value))[0 .. value.len / @sizeOf(u32)];
-    }
-
     fn reg(context: *@This(), value: []const u8) Error![][2]u64 {
         if (context.address_cells == null or context.size_cells == null) {
             return error.MissingCells;
@@ -324,12 +320,36 @@ fn resolve(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node) E
 fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node, unres: dtb.PropUnresolved) !dtb.Prop {
     switch (unres) {
         .Interrupts => |v| {
-            var groups = std.ArrayList([]u32).init(allocator);
-            errdefer groups.deinit();
+            const interrupt_cells = current.interruptCells() orelse return error.MissingCells;
+            const big_endian_cells = cellsBigEndian(v);
+            if (big_endian_cells.len % interrupt_cells != 0) {
+                return error.BadStructure;
+            }
 
-            const interrupt_cells = current.interruptCells();
+            const group_count = big_endian_cells.len / interrupt_cells;
+            var groups = try std.ArrayList([]u32).initCapacity(allocator, group_count);
+            errdefer {
+                for (groups.items) |group| allocator.free(group);
+                groups.deinit();
+            }
+
+            var group_i: usize = 0;
+            while (group_i < group_count) : (group_i += 1) {
+                var group = try allocator.alloc(u32, interrupt_cells);
+                var item_i: usize = 0;
+                while (item_i < interrupt_cells) : (item_i += 1) {
+                    group[item_i] = std.mem.bigToNative(u32, big_endian_cells[group_i * interrupt_cells + item_i]);
+                }
+                groups.appendAssumeCapacity(group);
+            }
 
             return dtb.Prop{ .Interrupts = groups.toOwnedSlice() };
         },
     }
+}
+
+// ---
+
+fn cellsBigEndian(value: []const u8) []const u32 {
+    return @ptrCast([*]const u32, @alignCast(@alignOf(u32), value))[0 .. value.len / @sizeOf(u32)];
 }
