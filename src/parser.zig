@@ -224,8 +224,12 @@ const NodeContext = struct {
             return dtb.Prop{ .InterruptParent = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "compatible")) {
             return dtb.Prop{ .Compatible = try context.stringList(value) };
+        } else if (std.mem.eql(u8, name, "clock-names")) {
+            return dtb.Prop{ .ClockNames = try context.stringList(value) };
         } else if (std.mem.eql(u8, name, "interrupts")) {
             return dtb.Prop{ .Unresolved = .{ .Interrupts = value } };
+        } else if (std.mem.eql(u8, name, "clocks")) {
+            return dtb.Prop{ .Unresolved = .{ .Clocks = value } };
         } else {
             return dtb.Prop{ .Unknown = .{ .name = name, .value = value } };
         }
@@ -270,7 +274,7 @@ const NodeContext = struct {
         }
 
         const pair_cells = context.address_cells.? + context.size_cells.?;
-        const big_endian_cells = cellsBigEndian(value);
+        const big_endian_cells = try cellsBigEndian(value);
 
         if (big_endian_cells.len % pair_cells != 0) {
             return error.BadStructure;
@@ -323,7 +327,7 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
     switch (unres) {
         .Interrupts => |v| {
             const interrupt_cells = current.interruptCells() orelse return error.MissingCells;
-            const big_endian_cells = cellsBigEndian(v);
+            const big_endian_cells = try cellsBigEndian(v);
             if (big_endian_cells.len % interrupt_cells != 0) {
                 return error.BadStructure;
             }
@@ -347,11 +351,39 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
 
             return dtb.Prop{ .Interrupts = groups.toOwnedSlice() };
         },
+        .Clocks => |v| {
+            const big_endian_cells = try cellsBigEndian(v);
+            var groups = std.ArrayList([]u32).init(allocator);
+            errdefer {
+                for (groups.items) |group| allocator.free(group);
+                groups.deinit();
+            }
+
+            var cell_i: usize = 0;
+            while (cell_i < big_endian_cells.len) {
+                const phandle = std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+                cell_i += 1;
+                const target = root.findPHandle(phandle) orelse return error.MissingCells;
+                const clock_cells = target.prop(.ClockCells) orelse return error.MissingCells;
+                var group = try allocator.alloc(u32, 1 + clock_cells);
+                errdefer allocator.free(group);
+                group[0] = clock_cells;
+                var item_i: usize = 0;
+                while (item_i < clock_cells) : (item_i += 1) {
+                    group[item_i + 1] = std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+                    cell_i += 1;
+                }
+                try groups.append(group);
+            }
+
+            return dtb.Prop{ .Clocks = groups.toOwnedSlice() };
+        },
     }
 }
 
 // ---
 
-fn cellsBigEndian(value: []const u8) []const u32 {
+fn cellsBigEndian(value: []const u8) ![]const u32 {
+    if (value.len % @sizeOf(u32) != 0) return error.BadStructure;
     return @ptrCast([*]const u32, @alignCast(@alignOf(u32), value))[0 .. value.len / @sizeOf(u32)];
 }

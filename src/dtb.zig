@@ -129,6 +129,8 @@ pub const Prop = union(enum) {
     Compatible: [][]const u8,
     Status: PropStatus,
     Interrupts: [][]u32,
+    Clocks: [][]u32,
+    ClockNames: [][]const u8,
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
@@ -151,7 +153,7 @@ pub const Prop = union(enum) {
             },
             .Compatible => |v| {
                 // Same format as dtc -O dts.
-                try writer.writeAll("\"");
+                try writer.writeAll("compatible: \"");
                 for (v) |s, i| {
                     if (i != 0) {
                         try writer.writeAll("\\0");
@@ -178,6 +180,31 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeAll(">");
             },
+            .Clocks => |groups| {
+                try writer.writeAll("clocks: <");
+                for (groups) |group, i| {
+                    if (i != 0) {
+                        try writer.writeAll(" ");
+                    }
+                    for (group) |item, j| {
+                        if (j != 0) {
+                            try writer.writeAll(" ");
+                        }
+                        try std.fmt.format(writer, "0x{x:0>2}", .{item});
+                    }
+                }
+                try writer.writeAll(">");
+            },
+            .ClockNames => |v| {
+                try writer.writeAll("clock-names: \"");
+                for (v) |s, i| {
+                    if (i != 0) {
+                        try writer.writeAll("\\0");
+                    }
+                    try writer.writeAll(s);
+                }
+                try writer.writeAll("\"");
+            },
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
@@ -186,8 +213,8 @@ pub const Prop = union(enum) {
     pub fn deinit(prop: Prop, allocator: *std.mem.Allocator) void {
         switch (prop) {
             .Reg => |v| allocator.free(v),
-            .Compatible => |v| allocator.free(v),
-            .Interrupts => |groups| {
+            .Compatible, .ClockNames => |v| allocator.free(v),
+            .Interrupts, .Clocks => |groups| {
                 for (groups) |group| {
                     allocator.free(group);
                 }
@@ -200,6 +227,7 @@ pub const Prop = union(enum) {
 
 pub const PropUnresolved = union(enum) {
     Interrupts: []const u8,
+    Clocks: []const u8,
 };
 
 pub const PropUnknown = struct {
@@ -242,13 +270,14 @@ test "parse" {
 
         // Test we refer to the apb-pclk's clock cells (0) correctly.
         testing.expectEqual(@as(u32, 0), qemu.propAt(&.{"apb-pclk"}, .ClockCells).?);
+        const clock_names = pl011.prop(.ClockNames).?;
         testing.expectEqual(@as(usize, 2), clock_names.len);
         testing.expectEqualSlices(u8, "uartclk", clock_names[0]);
         testing.expectEqualSlices(u8, "apb_pclk", clock_names[1]);
         const clocks = pl011.prop(.Clocks).?;
         testing.expectEqual(@as(usize, 2), clocks.len);
         testing.expectEqualSlices(u32, &.{0x8000}, clocks[0]);
-        testing.expectEqualSlices(u32, &.{0x8000}, clocks[0]);
+        testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
 
         // Make sure this works (and that the code gets compiled).
         std.debug.print("{}\n", .{qemu});
@@ -287,30 +316,6 @@ test "parse" {
         testing.expectEqual(@as(usize, 2), clocks.len);
         testing.expectEqualSlices(u32, &.{ 0x85, 0x51 }, clocks[0]);
         testing.expectEqualSlices(u32, &.{ 0x85, 0x6001 }, clocks[1]);
-
-        // Node <serial@ff180000>
-        // "rockchip,rk3399-uart\0snps,dw-apb-uart"
-        // reg: <0xff180000 0x100>
-        // clocks: (unk 16 bytes) <\x00\x00\x00\x85\x00\x00\x00Q\x00\x00\x00\x85\x00\x00\x01`>
-        // clock-names: (unk 17 bytes) <baudclk\x00apb_pclk\x00>
-        // interrupts: <0x00 0x63 0x04 0x00>
-        // reg-shift: 0x02
-        // reg-io-width: (unk 4 bytes) <\x00\x00\x00\x04>
-        // pinctrl-names: (unk 8 bytes) <default\x00>
-        // pinctrl-0: (unk 12 bytes) <\x00\x00\x01\x1b\x00\x00\x01\x1c\x00\x00\x01\x1d>
-        // status: "okay"
-        // phandle: <0x2c>
-        // Node <bluetooth>
-        //     "brcm,bcm43438-bt"
-        //     clocks: (unk 8 bytes) <\x00\x00\x00^\x00\x00\x00\x01>
-        //     clock-names: (unk 4 bytes) <lpo\x00>
-        //     device-wakeup-gpios: (unk 12 bytes) <\x00\x00\x00\xc5\x00\x00\x00\x1b\x00\x00\x00\x00>
-        //     host-wakeup-gpios: (unk 12 bytes) <\x00\x00\x00\xc3\x00\x00\x00\x04\x00\x00\x00\x00>
-        //     shutdown-gpios: (unk 12 bytes) <\x00\x00\x00\xc3\x00\x00\x00\t\x00\x00\x00\x00>
-        //     pinctrl-names: (unk 8 bytes) <default\x00>
-        //     pinctrl-0: (unk 12 bytes) <\x00\x00\x018\x00\x00\x019\x00\x00\x017>
-        //     vbat-supply: (unk 4 bytes) <\x00\x00\x01Q>
-        //     vddio-supply: (unk 4 bytes) <\x00\x00\x00b>
 
         // Print it out.
         std.debug.print("{}\n", .{rockpro64});
