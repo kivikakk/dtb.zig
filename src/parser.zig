@@ -54,7 +54,7 @@ pub const Error = std.mem.Allocator.Error || error{
     BadValue,
 };
 
-pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!dtb.Node {
+pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
     if (fdt.len < @sizeOf(FDTHeader)) {
         return error.Truncated;
     }
@@ -74,7 +74,8 @@ pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!dtb.Node {
         return error.BadStructure;
     }
 
-    var root = try parseBeginNode(allocator, &parser, null, null);
+    var root = try parseBeginNode(allocator, &parser, null, null, null, null);
+    errdefer root.deinit(allocator);
 
     if (parser.token() != .End) {
         return error.BadStructure;
@@ -82,6 +83,8 @@ pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!dtb.Node {
     if (parser.offset != header.off_dt_struct + header.size_dt_struct) {
         return error.BadStructure;
     }
+
+    try resolve(allocator, root, root);
 
     return root;
 }
@@ -131,12 +134,12 @@ const Parser = struct {
     }
 };
 
-fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, address_cells: ?u32, size_cells: ?u32) Error!dtb.Node {
+fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, root: ?*dtb.Node, parent: ?*dtb.Node, address_cells: ?u32, size_cells: ?u32) Error!*dtb.Node {
     const node_name = parser.cstring();
     parser.alignTo(u32);
 
     var props = std.ArrayList(dtb.Prop).init(allocator);
-    var children = std.ArrayList(dtb.Node).init(allocator);
+    var children = std.ArrayList(*dtb.Node).init(allocator);
 
     errdefer {
         for (props.items) |p| {
@@ -149,6 +152,9 @@ fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, address_cells:
         children.deinit();
     }
 
+    var node = try allocator.create(dtb.Node);
+    errdefer allocator.destroy(node);
+
     // Node inherts #address/#size-cells from parent, but its own props may override those for
     // its children (and other props?).
     var context = NodeContext{
@@ -160,7 +166,7 @@ fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, address_cells:
     while (true) {
         switch (parser.token()) {
             .BeginNode => {
-                var subnode = try parseBeginNode(allocator, parser, context.address_cells, context.size_cells);
+                var subnode = try parseBeginNode(allocator, parser, root orelse node, node, context.address_cells, context.size_cells);
                 try children.append(subnode);
             },
             .EndNode => {
@@ -180,11 +186,14 @@ fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, address_cells:
         }
     }
 
-    return dtb.Node{
+    node.* = .{
         .name = node_name,
         .props = props.toOwnedSlice(),
+        .root = root orelse node,
+        .parent = parent,
         .children = children.toOwnedSlice(),
     };
+    return node;
 }
 
 const NodeContext = struct {
@@ -294,3 +303,33 @@ const NodeContext = struct {
         return pairs;
     }
 };
+
+// ---
+
+fn resolve(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node) Error!void {
+    for (current.*.props) |*prop| {
+        switch (prop.*) {
+            .Unresolved => |unres| {
+                prop.* = try resolveProp(allocator, root, current, unres);
+            },
+            else => {},
+        }
+    }
+
+    for (current.*.children) |child| {
+        try resolve(allocator, root, child);
+    }
+}
+
+fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node, unres: dtb.PropUnresolved) !dtb.Prop {
+    switch (unres) {
+        .Interrupts => |v| {
+            var groups = std.ArrayList([]u32).init(allocator);
+            errdefer groups.deinit();
+
+            const interrupt_cells = current.interruptCells();
+
+            return dtb.Prop{ .Interrupts = groups.toOwnedSlice() };
+        },
+    }
+}

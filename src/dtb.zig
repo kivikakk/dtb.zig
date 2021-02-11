@@ -5,10 +5,12 @@ const parser = @import("parser.zig");
 pub const Node = struct {
     name: []const u8,
     props: []Prop,
-    children: []Node,
+    root: *Node,
+    parent: ?*Node,
+    children: []*Node,
 
-    pub fn propAt(start: Node, path: []const []const u8, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
-        var node: Node = start;
+    pub fn propAt(start: *const Node, path: []const []const u8, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
+        var node: *const Node = start;
         var i: usize = 0;
         while (i < path.len) : (i += 1) {
             node = node.child(path[i]) orelse return null;
@@ -16,7 +18,7 @@ pub const Node = struct {
         return node.prop(prop_tag);
     }
 
-    pub fn child(node: Node, child_name: []const u8) ?Node {
+    pub fn child(node: *const Node, child_name: []const u8) ?*Node {
         for (node.children) |c| {
             if (std.mem.eql(u8, child_name, c.name)) {
                 return c;
@@ -25,7 +27,7 @@ pub const Node = struct {
         return null;
     }
 
-    pub fn prop(node: Node, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
+    pub fn prop(node: *const Node, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
         for (node.props) |p| {
             if (p == prop_tag) {
                 return @field(p, @tagName(prop_tag));
@@ -34,7 +36,38 @@ pub const Node = struct {
         return null;
     }
 
-    pub fn deinit(node: Node, allocator: *std.mem.Allocator) void {
+    pub fn interruptCells(node: *Node) ?u32 {
+        if (node.prop(.InterruptCells)) |ic| {
+            return ic;
+        }
+        if (node.interruptParent()) |ip| {
+            return ip.interruptCells();
+        }
+        return null;
+    }
+
+    pub fn interruptParent(node: *Node) ?*Node {
+        if (node.prop(.InterruptParent)) |ip| {
+            return node.root.findPHandle(ip);
+        }
+        return node.parent;
+    }
+
+    pub fn findPHandle(node: *Node, phandle: u32) ?*Node {
+        if (node.prop(.PHandle)) |v| {
+            if (v == phandle) {
+                return node;
+            }
+        }
+        for (node.children) |c| {
+            if (c.findPHandle(phandle)) |n| {
+                return n;
+            }
+        }
+        return null;
+    }
+
+    pub fn deinit(node: *Node, allocator: *std.mem.Allocator) void {
         for (node.props) |p| {
             p.deinit(allocator);
         }
@@ -43,6 +76,7 @@ pub const Node = struct {
             c.deinit(allocator);
         }
         allocator.free(node.children);
+        allocator.destroy(node);
     }
 
     pub fn format(node: Node, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
