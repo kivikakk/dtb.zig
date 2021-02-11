@@ -199,6 +199,8 @@ const NodeContext = struct {
         } else if (std.mem.eql(u8, name, "#size-cells")) {
             context.size_cells = integer(u32, value);
             return dtb.Prop{ .SizeCells = context.size_cells.? };
+        } else if (std.mem.eql(u8, name, "#interrupt-cells")) {
+            return dtb.Prop{ .InterruptCells = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "reg-shift")) {
             return dtb.Prop{ .RegShift = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "reg")) {
@@ -207,8 +209,12 @@ const NodeContext = struct {
             return dtb.Prop{ .Status = try status(value) };
         } else if (std.mem.eql(u8, name, "phandle")) {
             return dtb.Prop{ .PHandle = integer(u32, value) };
+        } else if (std.mem.eql(u8, name, "interrupt-parent")) {
+            return dtb.Prop{ .InterruptParent = integer(u32, value) };
         } else if (std.mem.eql(u8, name, "compatible")) {
             return dtb.Prop{ .Compatible = try context.stringList(value) };
+        } else if (std.mem.eql(u8, name, "interrupts")) {
+            return dtb.Prop{ .Unresolved = .{ .Interrupts = value } };
         } else {
             return dtb.Prop{ .Unknown = .{ .name = name, .value = value } };
         }

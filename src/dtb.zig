@@ -86,17 +86,22 @@ pub const PropStatus = enum {
 pub const Prop = union(enum) {
     AddressCells: u32,
     SizeCells: u32,
+    InterruptCells: u32,
     RegShift: u32,
     PHandle: u32,
+    InterruptParent: u32,
     Reg: [][2]u64,
     Compatible: [][]const u8,
     Status: PropStatus,
+    Interrupts: [][]u32,
+    Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
     pub fn format(prop: Prop, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         switch (prop) {
-            .AddressCells => |v| try std.fmt.format(writer, "#address-cells: 0x{x:0>8}", .{v}),
-            .SizeCells => |v| try std.fmt.format(writer, "#size-cells: 0x{x:0>8}", .{v}),
+            .AddressCells => |v| try std.fmt.format(writer, "#address-cells: 0x{x:0>2}", .{v}),
+            .SizeCells => |v| try std.fmt.format(writer, "#size-cells: 0x{x:0>2}", .{v}),
+            .InterruptCells => |v| try std.fmt.format(writer, "#interrupt-cells: 0x{x:0>2}", .{v}),
             .RegShift => |v| try std.fmt.format(writer, "reg-shift: 0x{x:0>2}", .{v}),
             .Reg => |v| {
                 try writer.writeAll("reg: <");
@@ -120,6 +125,13 @@ pub const Prop = union(enum) {
                 try writer.writeAll("\"");
             },
             .Status => |v| try std.fmt.format(writer, "status: \"{s}\"", .{v}),
+            .PHandle => |v| try std.fmt.format(writer, "phandle: <0x{x:0>2}>", .{v}),
+            .InterruptParent => |v| try std.fmt.format(writer, "interrupt-parent: <0x{x:0>2}>", .{v}),
+            .Interrupts => |v| {
+                try writer.writeAll("interrupts: <");
+                try writer.writeAll("TODO>");
+            },
+            .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{s}: {}", .{ v.name, v.value }),
         }
     }
@@ -131,6 +143,10 @@ pub const Prop = union(enum) {
             else => {},
         }
     }
+};
+
+pub const PropUnresolved = union(enum) {
+    Interrupts: []const u8,
 };
 
 pub const PropUnknown = struct {
@@ -159,6 +175,13 @@ test "parse" {
     const compatible = qemu.propAt(&.{ "cpus", "cpu@0" }, .Compatible).?;
     testing.expectEqual(@as(usize, 1), compatible.len);
     testing.expectEqualStrings("arm,cortex-a53", compatible[0]);
+
+    // Its pl011 UART controller has interrupts at <0x00 0x01 0x04>.
+    // This tests the #interrupt-cells lookup.  Its interrupt domain
+    // is defined ahead of it in the file.
+    const interrupts = qemu.propAt(&.{"pl011@9000000"}, .Interrupts).?;
+    testing.expectEqual(@as(usize, 1), interrupts.len);
+    testing.expectEqualSlices(u32, &[_]u32{ 0x0, 0x01, 0x04 }, interrupts[0]);
 
     var rockpro64 = try parse(std.testing.allocator, rockpro64_dtb);
     defer rockpro64.deinit(std.testing.allocator);
