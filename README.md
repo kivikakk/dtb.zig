@@ -54,7 +54,7 @@ The `Traverser` type is used internally by the parser, and you can use it too.
 var qemu: Traverser = undefined;
 try qemu.init(qemu_dtb);
 
-var state: union(enum) { OutsidePl011, InsidePl011 } = .OutsidePl011;
+var state: enum { OutsidePl011, InsidePl011 } = .OutsidePl011;
 var ev = try qemu.current();
 
 var reg_value: ?[]const u8 = null;
