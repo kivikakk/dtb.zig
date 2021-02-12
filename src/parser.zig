@@ -227,11 +227,13 @@ const NodeContext = struct {
         } else if (std.mem.eql(u8, name, "pinctrl-names")) {
             return dtb.Prop{ .PinctrlNames = try context.stringList(value) };
         } else if (std.mem.eql(u8, name, "pinctrl-0")) {
-            return dtb.Prop{ .Pinctrl0 = try context.phandleList(value) };
+            return dtb.Prop{ .Pinctrl0 = try context.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "pinctrl-1")) {
-            return dtb.Prop{ .Pinctrl1 = try context.phandleList(value) };
+            return dtb.Prop{ .Pinctrl1 = try context.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "pinctrl-2")) {
-            return dtb.Prop{ .Pinctrl2 = try context.phandleList(value) };
+            return dtb.Prop{ .Pinctrl2 = try context.integerList(u32, value) };
+        } else if (std.mem.eql(u8, name, "assigned-clock-rates")) {
+            return dtb.Prop{ .AssignedClockRates = try context.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "reg")) {
             return dtb.Prop{ .Unresolved = .{ .Reg = value } };
         } else if (std.mem.eql(u8, name, "ranges")) {
@@ -250,12 +252,12 @@ const NodeContext = struct {
         return std.mem.bigToNative(T, @ptrCast(*const T, @alignCast(@alignOf(T), value.ptr)).*);
     }
 
-    fn phandleList(context: @This(), value: []const u8) ![]u32 {
-        if (value.len % @sizeOf(u32) != 0) return error.BadStructure;
-        var list = try context.allocator.alloc(u32, value.len / @sizeOf(u32));
+    fn integerList(context: @This(), comptime T: type, value: []const u8) ![]T {
+        if (value.len % @sizeOf(T) != 0) return error.BadStructure;
+        var list = try context.allocator.alloc(T, value.len / @sizeOf(T));
         var i: usize = 0;
         while (i < list.len) : (i += 1) {
-            list[i] = std.mem.bigToNative(u32, @ptrCast(*const u32, @alignCast(@alignOf(u32), value[i * @sizeOf(u32) ..].ptr)).*);
+            list[i] = std.mem.bigToNative(T, @ptrCast(*const T, @alignCast(@alignOf(T), value[i * @sizeOf(T) ..].ptr)).*);
         }
         return list;
     }

@@ -148,6 +148,7 @@ pub const Prop = union(enum) {
     Pinctrl0: []u32,
     Pinctrl1: []u32,
     Pinctrl2: []u32,
+    AssignedClockRates: []u32,
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
@@ -214,7 +215,7 @@ pub const Prop = union(enum) {
             },
             .ClockNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-names: ", writer),
             .ClockOutputNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-output-names: ", writer),
-            .ClockFrequency => |v| try std.fmt.format(writer, "clock-frequency: {}Hz", .{v}),
+            .ClockFrequency => |v| try (FrequencyFormatter{ .freq = v }).write("clock-frequency: ", writer),
             .InterruptNames => |v| try (StringListFormatter{ .string_list = v }).write("interrupt-names: ", writer),
             .RegIoWidth => |v| try std.fmt.format(writer, "reg-io-width: 0x{x:0>2}", .{v}),
             .PinctrlNames => |v| try (StringListFormatter{ .string_list = v }).write("pinctrl-names: ", writer),
@@ -233,11 +234,42 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeByte('>');
             },
+            .AssignedClockRates => |clock_rates| {
+                try writer.writeAll("assigned-clock-rates: <");
+                for (clock_rates) |clock_rate, i| {
+                    if (i != 0) {
+                        try writer.writeAll(" ");
+                    }
+                    try (FrequencyFormatter{ .freq = clock_rate }).write("", writer);
+                }
+                try writer.writeByte('>');
+            },
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
     }
 
+    const FrequencyFormatter = struct {
+        freq: u64,
+
+        // Exists to work around https://github.com/ziglang/zig/issues/7534.
+        pub fn write(this: @This(), comptime prefix: []const u8, writer: anytype) !void {
+            try writer.writeAll(prefix);
+            try this.format("", .{}, writer);
+        }
+
+        pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            if (this.freq / 1_000_000_000 > 0) {
+                try std.fmt.format(writer, "{d}GHz", .{@intToFloat(f32, this.freq / 1_000_000) / 1_000});
+            } else if (this.freq / 1_000_000 > 0) {
+                try std.fmt.format(writer, "{d}MHz", .{@intToFloat(f32, this.freq / 1_000) / 1_000});
+            } else if (this.freq / 1_000 > 0) {
+                try std.fmt.format(writer, "{d}kHz", .{@intToFloat(f32, this.freq) / 1_000});
+            } else {
+                try std.fmt.format(writer, "{}Hz", .{this.freq});
+            }
+        }
+    };
     const StringListFormatter = struct {
         string_list: [][]const u8,
 
@@ -284,6 +316,8 @@ pub const Prop = union(enum) {
             .Pinctrl1,
             .Pinctrl2,
             => |phandles| allocator.free(phandles),
+
+            .AssignedClockRates => |clock_rates| allocator.free(clock_rates),
 
             .AddressCells,
             .SizeCells,
