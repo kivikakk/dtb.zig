@@ -409,12 +409,12 @@ test "parse" {
         var rockpro64 = try parse(std.testing.allocator, rockpro64_dtb);
         defer rockpro64.deinit(std.testing.allocator);
 
-        // This ROCKPro64 DTB has a serial at 0xff180000.
-        const serial = rockpro64.child("serial@ff180000").?;
-        testing.expectEqualSlices([2]u128, &.{.{ 0xff180000, 0x100 }}, serial.prop(.Reg).?);
+        // This ROCKPro64 DTB has a serial at 0xff1a0000.
+        const serial = rockpro64.child("serial@ff1a0000").?;
+        testing.expectEqualSlices([2]u128, &.{.{ 0xff1a0000, 0x100 }}, serial.prop(.Reg).?);
         testing.expectEqual(PropStatus.Okay, serial.prop(.Status).?);
         testing.expectEqual(@as(u32, 2), serial.prop(.RegShift).?);
-        testing.expectEqual(@as(u32, 0x2c), serial.prop(.PHandle).?);
+        testing.expectEqual(@as(u32, 0x2e), serial.prop(.PHandle).?);
 
         const compatible = serial.prop(.Compatible).?;
         testing.expectEqual(@as(usize, 2), compatible.len);
@@ -424,9 +424,9 @@ test "parse" {
         const interrupts = serial.prop(.Interrupts).?;
         testing.expectEqual(@as(usize, 1), interrupts.len);
         // GICv3 specifies 4 interrupt cells. This defines an SPI-type
-        // interrupt, IRQ 99, level triggered. The last field must be zero
+        // interrupt, IRQ 100, level triggered. The last field must be zero
         // for SPI interrupts.
-        testing.expectEqualSlices(u32, &.{ 0x0, 0x63, 0x04, 0x00 }, interrupts[0]);
+        testing.expectEqualSlices(u32, &.{ 0x0, 0x64, 0x04, 0x00 }, interrupts[0]);
 
         // Test that we refer to the clock controller's clock cells (1) correctly.
         testing.expectEqual(@as(u32, 1), rockpro64.propAt(&.{"clock-controller@ff760000"}, .ClockCells).?);
@@ -436,8 +436,8 @@ test "parse" {
         testing.expectEqualSlices(u8, "apb_pclk", clock_names[1]);
         const clocks = serial.prop(.Clocks).?;
         testing.expectEqual(@as(usize, 2), clocks.len);
-        testing.expectEqualSlices(u32, &.{ 0x85, 0x51 }, clocks[0]);
-        testing.expectEqualSlices(u32, &.{ 0x85, 0x160 }, clocks[1]);
+        testing.expectEqualSlices(u32, &.{ 0x85, 0x53 }, clocks[0]);
+        testing.expectEqualSlices(u32, &.{ 0x85, 0x162 }, clocks[1]);
 
         // Print it out.
         std.debug.print("{}\n", .{rockpro64});
