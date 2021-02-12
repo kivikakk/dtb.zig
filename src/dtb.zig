@@ -143,6 +143,11 @@ pub const Prop = union(enum) {
     ClockOutputNames: [][]const u8,
     ClockFrequency: u64,
     InterruptNames: [][]const u8,
+    RegIoWidth: u64,
+    PinctrlNames: [][]const u8,
+    Pinctrl0: []u32,
+    Pinctrl1: []u32,
+    Pinctrl2: []u32,
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
@@ -211,6 +216,23 @@ pub const Prop = union(enum) {
             .ClockOutputNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-output-names: ", writer),
             .ClockFrequency => |v| try std.fmt.format(writer, "clock-frequency: {}Hz", .{v}),
             .InterruptNames => |v| try (StringListFormatter{ .string_list = v }).write("interrupt-names: ", writer),
+            .RegIoWidth => |v| try std.fmt.format(writer, "reg-io-width: 0x{x:0>2}", .{v}),
+            .PinctrlNames => |v| try (StringListFormatter{ .string_list = v }).write("pinctrl-names: ", writer),
+            .Pinctrl0, .Pinctrl1, .Pinctrl2 => |phandles| {
+                try std.fmt.format(writer, "pinctrl{s}: <", .{switch (prop) {
+                    .Pinctrl0 => "0",
+                    .Pinctrl1 => "1",
+                    .Pinctrl2 => "2",
+                    else => unreachable,
+                }});
+                for (phandles) |phandle, i| {
+                    if (i != 0) {
+                        try writer.writeAll(" ");
+                    }
+                    try std.fmt.format(writer, "0x{x:0>4}", .{phandle});
+                }
+                try writer.writeByte('>');
+            },
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
@@ -246,6 +268,7 @@ pub const Prop = union(enum) {
             .ClockNames,
             .ClockOutputNames,
             .InterruptNames,
+            .PinctrlNames,
             => |v| allocator.free(v),
 
             .Interrupts,
@@ -256,6 +279,11 @@ pub const Prop = union(enum) {
                 }
                 allocator.free(groups);
             },
+
+            .Pinctrl0,
+            .Pinctrl1,
+            .Pinctrl2,
+            => |phandles| allocator.free(phandles),
 
             .AddressCells,
             .SizeCells,
@@ -268,6 +296,7 @@ pub const Prop = union(enum) {
             .Unresolved,
             .Unknown,
             .ClockFrequency,
+            .RegIoWidth,
             => {},
         }
     }
