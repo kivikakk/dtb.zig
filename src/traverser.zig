@@ -14,7 +14,7 @@ pub const Event = union(enum) {
     BeginNode: []const u8,
     EndNode,
     Prop: Prop,
-    Done,
+    End,
 };
 
 pub const State = union(enum) {
@@ -134,7 +134,7 @@ pub fn traverse(fdt: []const u8, state: *State) void {
         return;
     }
 
-    state.* = .{ .Event = .Done };
+    state.* = .{ .Event = .End };
 }
 
 /// ---

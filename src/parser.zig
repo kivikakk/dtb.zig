@@ -21,7 +21,7 @@ pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
     errdefer root.deinit(allocator);
 
     switch (try parser.traverser.next()) {
-        .Done => {},
+        .End => {},
         else => return error.Internal,
     }
 
@@ -78,7 +78,7 @@ const Parser = struct {
                     errdefer parsedProp.deinit(self.allocator);
                     try props.append(parsedProp);
                 },
-                .Done => return error.Internal,
+                .End => return error.Internal,
             }
         }
         node.* = .{

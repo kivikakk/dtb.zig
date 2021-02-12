@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const parser = @import("parser.zig");
 const traverser = @import("traverser.zig");
+pub const Traverser = traverser.Traverser;
 
 pub const Node = struct {
     name: []const u8,
@@ -443,4 +444,31 @@ test "parse" {
         // Print it out.
         std.debug.print("{}\n", .{rockpro64});
     }
+}
+
+test "Traverser" {
+    var qemu: Traverser = undefined;
+    try qemu.init(qemu_dtb);
+
+    var state: union(enum) { OutsidePl011, InsidePl011 } = .OutsidePl011;
+    var ev = try qemu.current();
+
+    var reg_value: ?[]const u8 = null;
+
+    while (ev != .End) : (ev = try qemu.next()) {
+        switch (state) {
+            .OutsidePl011 => if (ev == .BeginNode and std.mem.startsWith(u8, ev.BeginNode, "pl011@")) {
+                state = .InsidePl011;
+            },
+            .InsidePl011 => switch (ev) {
+                .EndNode => state = .OutsidePl011,
+                .Prop => |prop| if (std.mem.eql(u8, prop.name, "reg")) {
+                    reg_value = prop.value;
+                },
+                else => {},
+            },
+        }
+    }
+
+    std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0x09, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0 }, reg_value.?);
 }
