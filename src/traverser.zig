@@ -7,20 +7,51 @@ pub const Error = error{
     BadMagic,
     UnsupportedVersion,
     BadStructure,
+    Internal,
 };
 
-pub const State = union(enum) {
-    NotStarted,
+pub const Event = union(enum) {
     BeginNode: []const u8,
     EndNode,
     Prop: Prop,
-    Error: Error,
     Done,
+};
+
+pub const State = union(enum) {
+    Event: Event,
+    Error: Error,
 };
 
 pub const Prop = struct {
     name: []const u8,
     value: []const u8,
+};
+
+pub const Traverser = struct {
+    const Self = @This();
+
+    state: State = .{ .Error = error.Internal },
+    frame: @Frame(traverse) = undefined,
+
+    pub fn init(self: *Self, fdt: []const u8) Error!void {
+        self.frame = async traverse(fdt, &self.state);
+        switch (try self.current()) {
+            .BeginNode => {},
+            else => return error.Internal,
+        }
+    }
+
+    pub fn current(self: *Self) Error!Event {
+        switch (self.state) {
+            .Event => |ev| return ev,
+            .Error => |err| return err,
+        }
+    }
+
+    pub fn next(self: *Self) Error!Event {
+        resume self.frame;
+        return self.current();
+    }
 };
 
 pub fn traverse(fdt: []const u8, state: *State) void {
@@ -43,7 +74,7 @@ pub fn traverse(fdt: []const u8, state: *State) void {
         return;
     }
 
-    var traverser = Traverser{ .fdt = fdt, .header = header, .offset = header.off_dt_struct };
+    var traverser = InternalTraverser{ .fdt = fdt, .header = header, .offset = header.off_dt_struct };
     if (traverser.token() != .BeginNode) {
         state.* = .{ .Error = error.BadStructure };
         return;
@@ -52,7 +83,7 @@ pub fn traverse(fdt: []const u8, state: *State) void {
     {
         const node_name = traverser.cstring();
         traverser.alignTo(u32);
-        state.* = .{ .BeginNode = node_name };
+        state.* = .{ .Event = .{ .BeginNode = node_name } };
         suspend;
     }
 
@@ -63,12 +94,12 @@ pub fn traverse(fdt: []const u8, state: *State) void {
                 depth += 1;
                 const node_name = traverser.cstring();
                 traverser.alignTo(u32);
-                state.* = .{ .BeginNode = node_name };
+                state.* = .{ .Event = .{ .BeginNode = node_name } };
                 suspend;
             },
             .EndNode => {
                 depth -= 1;
-                state.* = .EndNode;
+                state.* = .{ .Event = .EndNode };
                 suspend;
             },
             .Prop => {
@@ -76,9 +107,11 @@ pub fn traverse(fdt: []const u8, state: *State) void {
                 const prop_name = traverser.cstringFromSectionOffset(prop.nameoff);
                 const prop_value = traverser.buffer(prop.len);
                 state.* = .{
-                    .Prop = .{
-                        .name = prop_name,
-                        .value = prop_value,
+                    .Event = .{
+                        .Prop = .{
+                            .name = prop_name,
+                            .value = prop_value,
+                        },
                     },
                 };
                 suspend;
@@ -101,11 +134,11 @@ pub fn traverse(fdt: []const u8, state: *State) void {
         return;
     }
 
-    state.* = .Done;
+    state.* = .{ .Event = .Done };
 }
 
 /// ---
-const Traverser = struct {
+const InternalTraverser = struct {
     fdt: []const u8,
     header: FDTHeader,
     offset: usize,

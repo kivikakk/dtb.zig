@@ -7,28 +7,21 @@ pub const Error = traverser.Error || std.mem.Allocator.Error || error{
     MissingCells,
     UnsupportedCells,
     BadValue,
-    Internal,
 };
 
 pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
-    var parser = Parser{
-        .allocator = allocator,
-        .frame = undefined,
-    };
-    parser.frame = async traverser.traverse(fdt, &parser.traverse_state);
+    var parser: Parser = undefined;
+    try parser.init(allocator, fdt);
 
     var root =
-        switch (parser.traverse_state) {
+        switch (try parser.traverser.current()) {
         .BeginNode => |node_name| try parser.handleNode(node_name, null, null),
-        .Error => |err| return err,
         else => return error.BadStructure,
     };
     errdefer root.deinit(allocator);
 
-    resume parser.frame;
-    switch (parser.traverse_state) {
+    switch (try parser.traverser.next()) {
         .Done => {},
-        .Error => |err| return err,
         else => return error.Internal,
     }
 
@@ -41,9 +34,16 @@ pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
 const Parser = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator,
-    frame: @Frame(traverser.traverse),
-    traverse_state: traverser.State = .NotStarted,
+    allocator: *std.mem.Allocator = undefined,
+    traverser: traverser.Traverser = undefined,
+
+    fn init(self: *Self, allocator: *std.mem.Allocator, fdt: []const u8) !void {
+        self.* = Parser{
+            .allocator = allocator,
+            .traverser = .{},
+        };
+        try self.traverser.init(fdt);
+    }
 
     fn handleNode(self: *Self, node_name: []const u8, root: ?*dtb.Node, parent: ?*dtb.Node) Error!*dtb.Node {
         var props = std.ArrayList(dtb.Prop).init(self.allocator);
@@ -64,8 +64,7 @@ const Parser = struct {
         errdefer self.allocator.destroy(node);
 
         while (true) {
-            resume self.frame;
-            switch (self.traverse_state) {
+            switch (try self.traverser.next()) {
                 .BeginNode => |child_name| {
                     var subnode = try self.handleNode(child_name, root orelse node, node);
                     errdefer subnode.deinit(self.allocator);
@@ -79,12 +78,9 @@ const Parser = struct {
                     errdefer parsedProp.deinit(self.allocator);
                     try props.append(parsedProp);
                 },
-                .Error => |err| return err,
                 .Done => return error.Internal,
-                .NotStarted => return error.Internal,
             }
         }
-
         node.* = .{
             .name = node_name,
             .props = props.toOwnedSlice(),
