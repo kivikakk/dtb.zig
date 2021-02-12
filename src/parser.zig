@@ -242,6 +242,8 @@ const NodeContext = struct {
             return dtb.Prop{ .Unresolved = .{ .Interrupts = value } };
         } else if (std.mem.eql(u8, name, "clocks")) {
             return dtb.Prop{ .Unresolved = .{ .Clocks = value } };
+        } else if (std.mem.eql(u8, name, "assigned-clocks")) {
+            return dtb.Prop{ .Unresolved = .{ .AssignedClocks = value } };
         } else {
             return dtb.Prop{ .Unknown = .{ .name = name, .value = value } };
         }
@@ -352,7 +354,9 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
 
             return dtb.Prop{ .Interrupts = groups.toOwnedSlice() };
         },
-        .Clocks => |v| {
+        .Clocks,
+        .AssignedClocks,
+        => |v| {
             const big_endian_cells = try cellsBigEndian(v);
             var groups = std.ArrayList([]u32).init(allocator);
             errdefer {
@@ -377,7 +381,11 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
                 try groups.append(group);
             }
 
-            return dtb.Prop{ .Clocks = groups.toOwnedSlice() };
+            return switch (unres) {
+                .Clocks => dtb.Prop{ .Clocks = groups.toOwnedSlice() },
+                .AssignedClocks => dtb.Prop{ .AssignedClocks = groups.toOwnedSlice() },
+                else => unreachable,
+            };
         },
     }
 }

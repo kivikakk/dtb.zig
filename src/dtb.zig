@@ -149,6 +149,7 @@ pub const Prop = union(enum) {
     Pinctrl1: []u32,
     Pinctrl2: []u32,
     AssignedClockRates: []u32,
+    AssignedClocks: [][]u32,
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
@@ -198,8 +199,14 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeAll(">");
             },
-            .Clocks => |groups| {
-                try writer.writeAll("clocks: <");
+            .Clocks,
+            .AssignedClocks,
+            => |groups| {
+                switch (prop) {
+                    .Clocks => try writer.writeAll("clocks: <"),
+                    .AssignedClocks => try writer.writeAll("assigned-clocks: <"),
+                    else => unreachable,
+                }
                 for (groups) |group, i| {
                     if (i != 0) {
                         try writer.writeAll(">, <");
@@ -305,6 +312,7 @@ pub const Prop = union(enum) {
 
             .Interrupts,
             .Clocks,
+            .AssignedClocks,
             => |groups| {
                 for (groups) |group| {
                     allocator.free(group);
@@ -341,6 +349,7 @@ pub const PropUnresolved = union(enum) {
     Ranges: []const u8,
     Interrupts: []const u8,
     Clocks: []const u8,
+    AssignedClocks: []const u8,
 };
 
 pub const PropUnknown = struct {
