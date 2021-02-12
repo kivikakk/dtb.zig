@@ -1,87 +1,35 @@
 const std = @import("std");
 const dtb = @import("dtb.zig");
+usingnamespace @import("util.zig");
+const traverser = @import("traverser.zig");
 
-const FDTHeader = packed struct {
-    magic: u32,
-    totalsize: u32,
-    off_dt_struct: u32,
-    off_dt_strings: u32,
-    off_mem_rsvmap: u32,
-    version: u32,
-    last_comp_version: u32,
-    boot_cpuid_phys: u32,
-    size_dt_strings: u32,
-    size_dt_struct: u32,
-};
-
-const FDTReserveEntry = packed struct {
-    address: u64,
-    size: u64,
-};
-
-const FDTToken = packed enum(u32) {
-    BeginNode = 0x00000001,
-    EndNode = 0x00000002,
-    Prop = 0x00000003,
-    Nop = 0x00000004,
-    End = 0x00000009,
-};
-
-const FDTProp = packed struct {
-    len: u32,
-    nameoff: u32,
-};
-
-// ---
-
-fn structBigToNative(comptime T: type, s: T) T {
-    var r = s;
-    inline for (std.meta.fields(T)) |field| {
-        @field(r, field.name) = std.mem.bigToNative(field.field_type, @field(r, field.name));
-    }
-    return r;
-}
-
-// ---
-
-pub const Error = std.mem.Allocator.Error || error{
-    Truncated,
-    BadMagic,
-    UnsupportedVersion,
-    BadStructure,
+pub const Error = traverser.Error || std.mem.Allocator.Error || error{
     MissingCells,
     UnsupportedCells,
     BadValue,
+    Internal,
 };
 
 pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
-    if (fdt.len < @sizeOf(FDTHeader)) {
-        return error.Truncated;
-    }
-    const header = structBigToNative(FDTHeader, @ptrCast(*const FDTHeader, fdt.ptr).*);
-    if (header.magic != 0xd00dfeed) {
-        return error.BadMagic;
-    }
-    if (fdt.len < header.totalsize) {
-        return error.Truncated;
-    }
-    if (header.version != 17) {
-        return error.UnsupportedVersion;
-    }
+    var parser = Parser{
+        .allocator = allocator,
+        .frame = undefined,
+    };
+    parser.frame = async traverser.traverse(fdt, &parser.traverse_state);
 
-    var parser = Parser{ .fdt = fdt, .header = header, .offset = header.off_dt_struct };
-    if (parser.token() != .BeginNode) {
-        return error.BadStructure;
-    }
-
-    var root = try parseBeginNode(allocator, &parser, null, null);
+    var root =
+        switch (parser.traverse_state) {
+        .BeginNode => |node_name| try parser.handleNode(node_name, null, null),
+        .Error => |err| return err,
+        else => return error.BadStructure,
+    };
     errdefer root.deinit(allocator);
 
-    if (parser.token() != .End) {
-        return error.BadStructure;
-    }
-    if (parser.offset != header.off_dt_struct + header.size_dt_struct) {
-        return error.BadStructure;
+    resume parser.frame;
+    switch (parser.traverse_state) {
+        .Done => {},
+        .Error => |err| return err,
+        else => return error.Internal,
     }
 
     try resolve(allocator, root, root);
@@ -91,111 +39,63 @@ pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
 
 /// ---
 const Parser = struct {
-    fdt: []const u8,
-    header: FDTHeader,
-    offset: usize,
+    const Self = @This();
 
-    fn aligned(parser: *@This(), comptime T: type) T {
-        const size = @sizeOf(T);
-        const value = @ptrCast(*const T, @alignCast(@alignOf(T), parser.fdt[parser.offset .. parser.offset + size])).*;
-        parser.offset += size;
-        return value;
-    }
-
-    fn buffer(parser: *@This(), length: usize) []const u8 {
-        const value = parser.fdt[parser.offset .. parser.offset + length];
-        parser.offset += length;
-        return value;
-    }
-
-    fn token(parser: *@This()) FDTToken {
-        return @intToEnum(FDTToken, std.mem.bigToNative(u32, parser.aligned(u32)));
-    }
-
-    fn object(parser: *@This(), comptime T: type) T {
-        return structBigToNative(T, parser.aligned(T));
-    }
-
-    fn cstring(parser: *@This()) []const u8 {
-        const length = std.mem.lenZ(@ptrCast([*c]const u8, parser.fdt[parser.offset..]));
-        const value = parser.fdt[parser.offset .. parser.offset + length];
-        parser.offset += length + 1;
-        return value;
-    }
-
-    fn cstringFromSectionOffset(parser: @This(), offset: usize) []const u8 {
-        const length = std.mem.lenZ(@ptrCast([*c]const u8, parser.fdt[parser.header.off_dt_strings + offset ..]));
-        return parser.fdt[parser.header.off_dt_strings + offset ..][0..length];
-    }
-
-    fn alignTo(parser: *@This(), comptime T: type) void {
-        parser.offset += @sizeOf(T) - 1;
-        parser.offset &= ~@as(usize, @sizeOf(T) - 1);
-    }
-};
-
-fn parseBeginNode(allocator: *std.mem.Allocator, parser: *Parser, root: ?*dtb.Node, parent: ?*dtb.Node) Error!*dtb.Node {
-    const node_name = parser.cstring();
-    parser.alignTo(u32);
-
-    var props = std.ArrayList(dtb.Prop).init(allocator);
-    var children = std.ArrayList(*dtb.Node).init(allocator);
-
-    errdefer {
-        for (props.items) |p| {
-            p.deinit(allocator);
-        }
-        props.deinit();
-        for (children.items) |c| {
-            c.deinit(allocator);
-        }
-        children.deinit();
-    }
-
-    var node = try allocator.create(dtb.Node);
-    errdefer allocator.destroy(node);
-
-    var context = NodeContext{
-        .allocator = allocator,
-    };
-
-    while (true) {
-        switch (parser.token()) {
-            .BeginNode => {
-                var subnode = try parseBeginNode(allocator, parser, root orelse node, node);
-                try children.append(subnode);
-            },
-            .EndNode => {
-                break;
-            },
-            .Prop => {
-                const prop = parser.object(FDTProp);
-                const prop_name = parser.cstringFromSectionOffset(prop.nameoff);
-                const prop_value = parser.buffer(prop.len);
-                try props.append(try context.prop(prop_name, prop_value));
-                parser.alignTo(u32);
-            },
-            .Nop => {},
-            .End => {
-                return error.BadStructure;
-            },
-        }
-    }
-
-    node.* = .{
-        .name = node_name,
-        .props = props.toOwnedSlice(),
-        .root = root orelse node,
-        .parent = parent,
-        .children = children.toOwnedSlice(),
-    };
-    return node;
-}
-
-const NodeContext = struct {
     allocator: *std.mem.Allocator,
+    frame: @Frame(traverser.traverse),
+    traverse_state: traverser.State = .NotStarted,
 
-    fn prop(context: *@This(), name: []const u8, value: []const u8) Error!dtb.Prop {
+    fn handleNode(self: *Self, node_name: []const u8, root: ?*dtb.Node, parent: ?*dtb.Node) Error!*dtb.Node {
+        var props = std.ArrayList(dtb.Prop).init(self.allocator);
+        var children = std.ArrayList(*dtb.Node).init(self.allocator);
+
+        errdefer {
+            for (props.items) |p| {
+                p.deinit(self.allocator);
+            }
+            props.deinit();
+            for (children.items) |c| {
+                c.deinit(self.allocator);
+            }
+            children.deinit();
+        }
+
+        var node = try self.allocator.create(dtb.Node);
+        errdefer self.allocator.destroy(node);
+
+        while (true) {
+            resume self.frame;
+            switch (self.traverse_state) {
+                .BeginNode => |child_name| {
+                    var subnode = try self.handleNode(child_name, root orelse node, node);
+                    errdefer subnode.deinit(self.allocator);
+                    try children.append(subnode);
+                },
+                .EndNode => {
+                    break;
+                },
+                .Prop => |prop| {
+                    var parsedProp = try self.handleProp(prop.name, prop.value);
+                    errdefer parsedProp.deinit(self.allocator);
+                    try props.append(parsedProp);
+                },
+                .Error => |err| return err,
+                .Done => return error.Internal,
+                .NotStarted => return error.Internal,
+            }
+        }
+
+        node.* = .{
+            .name = node_name,
+            .props = props.toOwnedSlice(),
+            .root = root orelse node,
+            .parent = parent,
+            .children = children.toOwnedSlice(),
+        };
+        return node;
+    }
+
+    fn handleProp(self: *Parser, name: []const u8, value: []const u8) Error!dtb.Prop {
         if (std.mem.eql(u8, name, "#address-cells")) {
             return dtb.Prop{ .AddressCells = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "#size-cells")) {
@@ -213,27 +113,27 @@ const NodeContext = struct {
         } else if (std.mem.eql(u8, name, "interrupt-parent")) {
             return dtb.Prop{ .InterruptParent = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "compatible")) {
-            return dtb.Prop{ .Compatible = try context.stringList(value) };
+            return dtb.Prop{ .Compatible = try self.stringList(value) };
         } else if (std.mem.eql(u8, name, "clock-names")) {
-            return dtb.Prop{ .ClockNames = try context.stringList(value) };
+            return dtb.Prop{ .ClockNames = try self.stringList(value) };
         } else if (std.mem.eql(u8, name, "clock-output-names")) {
-            return dtb.Prop{ .ClockOutputNames = try context.stringList(value) };
+            return dtb.Prop{ .ClockOutputNames = try self.stringList(value) };
         } else if (std.mem.eql(u8, name, "interrupt-names")) {
-            return dtb.Prop{ .InterruptNames = try context.stringList(value) };
+            return dtb.Prop{ .InterruptNames = try self.stringList(value) };
         } else if (std.mem.eql(u8, name, "clock-frequency")) {
             return dtb.Prop{ .ClockFrequency = try u32OrU64(value) };
         } else if (std.mem.eql(u8, name, "reg-io-width")) {
             return dtb.Prop{ .RegIoWidth = try u32OrU64(value) };
         } else if (std.mem.eql(u8, name, "pinctrl-names")) {
-            return dtb.Prop{ .PinctrlNames = try context.stringList(value) };
+            return dtb.Prop{ .PinctrlNames = try self.stringList(value) };
         } else if (std.mem.eql(u8, name, "pinctrl-0")) {
-            return dtb.Prop{ .Pinctrl0 = try context.integerList(u32, value) };
+            return dtb.Prop{ .Pinctrl0 = try self.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "pinctrl-1")) {
-            return dtb.Prop{ .Pinctrl1 = try context.integerList(u32, value) };
+            return dtb.Prop{ .Pinctrl1 = try self.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "pinctrl-2")) {
-            return dtb.Prop{ .Pinctrl2 = try context.integerList(u32, value) };
+            return dtb.Prop{ .Pinctrl2 = try self.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "assigned-clock-rates")) {
-            return dtb.Prop{ .AssignedClockRates = try context.integerList(u32, value) };
+            return dtb.Prop{ .AssignedClockRates = try self.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "reg")) {
             return dtb.Prop{ .Unresolved = .{ .Reg = value } };
         } else if (std.mem.eql(u8, name, "ranges")) {
@@ -254,9 +154,9 @@ const NodeContext = struct {
         return std.mem.bigToNative(T, @ptrCast(*const T, @alignCast(@alignOf(T), value.ptr)).*);
     }
 
-    fn integerList(context: @This(), comptime T: type, value: []const u8) ![]T {
+    fn integerList(self: *Parser, comptime T: type, value: []const u8) ![]T {
         if (value.len % @sizeOf(T) != 0) return error.BadStructure;
-        var list = try context.allocator.alloc(T, value.len / @sizeOf(T));
+        var list = try self.allocator.alloc(T, value.len / @sizeOf(T));
         var i: usize = 0;
         while (i < list.len) : (i += 1) {
             list[i] = std.mem.bigToNative(T, @ptrCast(*const T, @alignCast(@alignOf(T), value[i * @sizeOf(T) ..].ptr)).*);
@@ -272,10 +172,10 @@ const NodeContext = struct {
         };
     }
 
-    fn stringList(context: @This(), value: []const u8) Error![][]const u8 {
+    fn stringList(self: *Parser, value: []const u8) Error![][]const u8 {
         const count = std.mem.count(u8, value, "\x00");
-        var strings = try context.allocator.alloc([]const u8, count);
-        errdefer context.allocator.free(strings);
+        var strings = try self.allocator.alloc([]const u8, count);
+        errdefer self.allocator.free(strings);
         var offset: usize = 0;
         var strings_i: usize = 0;
         while (offset < value.len) : (strings_i += 1) {

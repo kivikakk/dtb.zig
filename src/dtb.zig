@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const parser = @import("parser.zig");
+const traverser = @import("traverser.zig");
 
 pub const Node = struct {
     name: []const u8,
