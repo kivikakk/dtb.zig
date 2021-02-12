@@ -46,6 +46,37 @@ testing.expectEqualSlices(u32, &.{0x8000}, clocks[0]);
 testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
 ```
 
+## no heap? no problem
+
+The `Traverser` type is used internally by the parser, and you can use it too.
+
+```zig
+var qemu: Traverser = undefined;
+try qemu.init(qemu_dtb);
+
+var state: union(enum) { OutsidePl011, InsidePl011 } = .OutsidePl011;
+var ev = try qemu.current();
+
+var reg_value: ?[]const u8 = null;
+
+while (ev != .End) : (ev = try qemu.next()) {
+    switch (state) {
+        .OutsidePl011 => if (ev == .BeginNode and std.mem.startsWith(u8, ev.BeginNode, "pl011@")) {
+            state = .InsidePl011;
+        },
+        .InsidePl011 => switch (ev) {
+            .EndNode => state = .OutsidePl011,
+            .Prop => |prop| if (std.mem.eql(u8, prop.name, "reg")) {
+                reg_value = prop.value;
+            },
+            else => {},
+        },
+    }
+}
+
+std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0x09, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0 }, reg_value.?);
+```
+
 ## notes, incomplete
 
 Still many prop types are just left unparsed. Please add them as you go! Merge requests happily accepted.
