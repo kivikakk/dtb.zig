@@ -54,6 +54,17 @@ pub const Traverser = struct {
     }
 };
 
+/// Try to carefully extract the total size of an FDT at this address.
+pub fn totalSize(fdt: *c_void) Error!u32 {
+    const header_ptr = @ptrCast(*const FDTHeader, fdt);
+
+    if (std.mem.bigToNative(u32, header_ptr.magic) != FDTMagic) {
+        return error.BadMagic;
+    }
+
+    return std.mem.bigToNative(u32, header_ptr.totalsize);
+}
+
 pub fn traverse(fdt: []const u8, state: *State) void {
     if (fdt.len < @sizeOf(FDTHeader)) {
         state.* = .{ .Error = error.Truncated };
@@ -61,7 +72,7 @@ pub fn traverse(fdt: []const u8, state: *State) void {
     }
 
     const header = structBigToNative(FDTHeader, @ptrCast(*const FDTHeader, fdt.ptr).*);
-    if (header.magic != 0xd00dfeed) {
+    if (header.magic != FDTMagic) {
         state.* = .{ .Error = error.BadMagic };
         return;
     }

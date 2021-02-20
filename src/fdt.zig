@@ -1,3 +1,5 @@
+pub const FDTMagic: u32 = 0xd00dfeed;
+
 pub const FDTHeader = packed struct {
     magic: u32,
     totalsize: u32,

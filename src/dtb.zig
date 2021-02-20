@@ -3,6 +3,7 @@ const testing = std.testing;
 const parser = @import("parser.zig");
 const traverser = @import("traverser.zig");
 pub const Traverser = traverser.Traverser;
+pub const totalSize = traverser.totalSize;
 
 pub const Node = struct {
     name: []const u8,
