@@ -96,7 +96,7 @@ pub const Node = struct {
 
     fn formatNode(node: Node, writer: anytype, depth: usize) std.os.WriteError!void {
         try indent(writer, depth);
-        try std.fmt.format(writer, "Node <{s}>\n", .{std.zig.fmtEscapes(node.name)});
+        try std.fmt.format(writer, "Node <{'}>\n", .{std.zig.fmtEscapes(node.name)});
         for (node.props) |p| {
             try indent(writer, depth + 1);
             try std.fmt.format(writer, "{}\n", .{p});
@@ -255,7 +255,7 @@ pub const Prop = union(enum) {
                 try writer.writeByte('>');
             },
             .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
-            .Unknown => |v| try std.fmt.format(writer, "{s}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
+            .Unknown => |v| try std.fmt.format(writer, "{'}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
     }
 
@@ -363,23 +363,23 @@ pub const PropUnknown = struct {
 pub const parse = parser.parse;
 pub const Error = parser.Error;
 
-const qemu_dtb = @embedFile("../qemu.dtb");
+const qemu_arm64_dtb = @embedFile("../qemu_arm64.dtb");
 const rockpro64_dtb = @embedFile("../rk3399-rockpro64.dtb");
 
 test "parse" {
     {
-        var qemu = try parse(std.testing.allocator, qemu_dtb);
-        defer qemu.deinit(std.testing.allocator);
+        var qemu_arm64 = try parse(std.testing.allocator, qemu_arm64_dtb);
+        defer qemu_arm64.deinit(std.testing.allocator);
 
         // This QEMU DTB places 512MiB of memory at 1GiB.
         testing.expectEqualSlices(
             [2]u128,
             &.{.{ 1024 * 1024 * 1024, 512 * 1024 * 1024 }},
-            qemu.propAt(&.{"memory@40000000"}, .Reg).?,
+            qemu_arm64.propAt(&.{"memory@40000000"}, .Reg).?,
         );
 
         // It has an A53-compatible CPU.
-        const compatible = qemu.propAt(&.{ "cpus", "cpu@0" }, .Compatible).?;
+        const compatible = qemu_arm64.propAt(&.{ "cpus", "cpu@0" }, .Compatible).?;
         testing.expectEqual(@as(usize, 1), compatible.len);
         testing.expectEqualStrings("arm,cortex-a53", compatible[0]);
 
@@ -388,13 +388,13 @@ test "parse" {
         // is defined ahead of it in the file.
         // This defines one SPI-type interrupt, IRQ 1, active high
         // level-sensitive. See https://git.io/JtKJk.
-        const pl011 = qemu.child("pl011@9000000").?;
+        const pl011 = qemu_arm64.child("pl011@9000000").?;
         const interrupts = pl011.prop(.Interrupts).?;
         testing.expectEqual(@as(usize, 1), interrupts.len);
         testing.expectEqualSlices(u32, &.{ 0x0, 0x01, 0x04 }, interrupts[0]);
 
         // Test we refer to the apb-pclk's clock cells (0) correctly.
-        testing.expectEqual(@as(u32, 0), qemu.propAt(&.{"apb-pclk"}, .ClockCells).?);
+        testing.expectEqual(@as(u32, 0), qemu_arm64.propAt(&.{"apb-pclk"}, .ClockCells).?);
         const clock_names = pl011.prop(.ClockNames).?;
         testing.expectEqual(@as(usize, 2), clock_names.len);
         testing.expectEqualSlices(u8, "uartclk", clock_names[0]);
@@ -405,7 +405,7 @@ test "parse" {
         testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
 
         // Make sure this works (and that the code gets compiled).
-        std.debug.print("{}\n", .{qemu});
+        std.debug.print("{}\n", .{qemu_arm64});
     }
 
     {
@@ -448,15 +448,15 @@ test "parse" {
 }
 
 test "Traverser" {
-    var qemu: Traverser = undefined;
-    try qemu.init(qemu_dtb);
+    var qemu_arm64: Traverser = undefined;
+    try qemu_arm64.init(qemu_arm64_dtb);
 
     var state: union(enum) { OutsidePl011, InsidePl011 } = .OutsidePl011;
-    var ev = try qemu.current();
+    var ev = try qemu_arm64.current();
 
     var reg_value: ?[]const u8 = null;
 
-    while (ev != .End) : (ev = try qemu.next()) {
+    while (ev != .End) : (ev = try qemu_arm64.next()) {
         switch (state) {
             .OutsidePl011 => if (ev == .BeginNode and std.mem.startsWith(u8, ev.BeginNode, "pl011@")) {
                 state = .InsidePl011;
