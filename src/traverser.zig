@@ -95,7 +95,7 @@ pub fn traverse(fdt: []const u8, state: *State) void {
         const node_name = traverser.cstring();
         traverser.alignTo(u32);
         state.* = .{ .Event = .{ .BeginNode = node_name } };
-        suspend;
+        suspend {}
     }
 
     var depth: usize = 1;
@@ -106,12 +106,12 @@ pub fn traverse(fdt: []const u8, state: *State) void {
                 const node_name = traverser.cstring();
                 traverser.alignTo(u32);
                 state.* = .{ .Event = .{ .BeginNode = node_name } };
-                suspend;
+                suspend {}
             },
             .EndNode => {
                 depth -= 1;
                 state.* = .{ .Event = .EndNode };
-                suspend;
+                suspend {}
             },
             .Prop => {
                 const prop = traverser.object(FDTProp);
@@ -125,7 +125,7 @@ pub fn traverse(fdt: []const u8, state: *State) void {
                         },
                     },
                 };
-                suspend;
+                suspend {}
                 traverser.alignTo(u32);
             },
             .Nop => {},
