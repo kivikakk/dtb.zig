@@ -169,7 +169,7 @@ pub const Traverser = struct {
 
 /// Try to carefully extract the total size of an FDT at this address.
 pub fn totalSize(blob: *anyopaque) Error!u32 {
-    const header_ptr = @ptrCast(*const fdt.FDTHeader, blob);
+    const header_ptr = @ptrCast(*align(1) const fdt.FDTHeader, blob);
 
     if (std.mem.bigToNative(u32, header_ptr.magic) != fdt.FDTMagic) {
         return error.BadMagic;
