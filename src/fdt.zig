@@ -1,6 +1,6 @@
 pub const FDTMagic: u32 = 0xd00dfeed;
 
-pub const FDTHeader = packed struct {
+pub const FDTHeader = extern struct {
     magic: u32,
     totalsize: u32,
     off_dt_struct: u32,
@@ -13,7 +13,7 @@ pub const FDTHeader = packed struct {
     size_dt_struct: u32,
 };
 
-pub const FDTReserveEntry = packed struct {
+pub const FDTReserveEntry = extern struct {
     address: u64,
     size: u64,
 };
@@ -26,7 +26,7 @@ pub const FDTToken = enum(u32) {
     End = 0x00000009,
 };
 
-pub const FDTProp = packed struct {
+pub const FDTProp = extern struct {
     len: u32,
     nameoff: u32,
 };
