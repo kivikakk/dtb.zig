@@ -78,7 +78,7 @@ pub const Node = struct {
         return node.prop(.SizeCells) orelse (node.parent orelse return null).sizeCells();
     }
 
-    pub fn deinit(node: *Node, allocator: *std.mem.Allocator) void {
+    pub fn deinit(node: *Node, allocator: std.mem.Allocator) void {
         for (node.props) |p| {
             p.deinit(allocator);
         }
@@ -91,6 +91,8 @@ pub const Node = struct {
     }
 
     pub fn format(node: Node, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
         try node.formatNode(writer, 0);
     }
 
@@ -120,6 +122,8 @@ pub const PropStatus = enum {
     Fail,
 
     pub fn format(status: PropStatus, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
         switch (status) {
             .Okay => try writer.writeAll("okay"),
             .Disabled => try writer.writeAll("disabled"),
@@ -157,6 +161,8 @@ pub const Prop = union(enum) {
     Unknown: PropUnknown,
 
     pub fn format(prop: Prop, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
         switch (prop) {
             .AddressCells => |v| try std.fmt.format(writer, "#address-cells: 0x{x:0>2}", .{v}),
             .SizeCells => |v| try std.fmt.format(writer, "#size-cells: 0x{x:0>2}", .{v}),
@@ -254,7 +260,7 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeByte('>');
             },
-            .Unresolved => |v| try writer.writeAll("UNRESOLVED"),
+            .Unresolved => |_| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{'}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
     }
@@ -269,6 +275,8 @@ pub const Prop = union(enum) {
         }
 
         pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            _ = options;
             if (this.freq / 1_000_000_000 > 0) {
                 try std.fmt.format(writer, "{d}GHz", .{@intToFloat(f32, this.freq / 1_000_000) / 1_000});
             } else if (this.freq / 1_000_000 > 0) {
@@ -290,6 +298,8 @@ pub const Prop = union(enum) {
         }
 
         pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            _ = options;
             try writer.writeByte('"');
             for (this.string_list) |s, i| {
                 if (i != 0) {
@@ -301,7 +311,7 @@ pub const Prop = union(enum) {
         }
     };
 
-    pub fn deinit(prop: Prop, allocator: *std.mem.Allocator) void {
+    pub fn deinit(prop: Prop, allocator: std.mem.Allocator) void {
         switch (prop) {
             .Reg => |v| allocator.free(v),
             .Ranges => |v| allocator.free(v),
@@ -363,8 +373,8 @@ pub const PropUnknown = struct {
 pub const parse = parser.parse;
 pub const Error = parser.Error;
 
-const qemu_arm64_dtb = @embedFile("../qemu_arm64.dtb");
-const rockpro64_dtb = @embedFile("../rk3399-rockpro64.dtb");
+const qemu_arm64_dtb = @embedFile("qemu_arm64.dtb");
+const rockpro64_dtb = @embedFile("rk3399-rockpro64.dtb");
 
 test "parse" {
     {
@@ -372,7 +382,7 @@ test "parse" {
         defer qemu_arm64.deinit(std.testing.allocator);
 
         // This QEMU DTB places 512MiB of memory at 1GiB.
-        testing.expectEqualSlices(
+        try testing.expectEqualSlices(
             [2]u128,
             &.{.{ 1024 * 1024 * 1024, 512 * 1024 * 1024 }},
             qemu_arm64.propAt(&.{"memory@40000000"}, .Reg).?,
@@ -380,8 +390,8 @@ test "parse" {
 
         // It has an A53-compatible CPU.
         const compatible = qemu_arm64.propAt(&.{ "cpus", "cpu@0" }, .Compatible).?;
-        testing.expectEqual(@as(usize, 1), compatible.len);
-        testing.expectEqualStrings("arm,cortex-a53", compatible[0]);
+        try testing.expectEqual(@as(usize, 1), compatible.len);
+        try testing.expectEqualStrings("arm,cortex-a53", compatible[0]);
 
         // Its pl011 UART controller has interrupts defined by <0x00 0x01 0x04>.
         // This tests the #interrupt-cells lookup.  Its interrupt domain
@@ -390,19 +400,19 @@ test "parse" {
         // level-sensitive. See https://git.io/JtKJk.
         const pl011 = qemu_arm64.child("pl011@9000000").?;
         const interrupts = pl011.prop(.Interrupts).?;
-        testing.expectEqual(@as(usize, 1), interrupts.len);
-        testing.expectEqualSlices(u32, &.{ 0x0, 0x01, 0x04 }, interrupts[0]);
+        try testing.expectEqual(@as(usize, 1), interrupts.len);
+        try testing.expectEqualSlices(u32, &.{ 0x0, 0x01, 0x04 }, interrupts[0]);
 
         // Test we refer to the apb-pclk's clock cells (0) correctly.
-        testing.expectEqual(@as(u32, 0), qemu_arm64.propAt(&.{"apb-pclk"}, .ClockCells).?);
+        try testing.expectEqual(@as(u32, 0), qemu_arm64.propAt(&.{"apb-pclk"}, .ClockCells).?);
         const clock_names = pl011.prop(.ClockNames).?;
-        testing.expectEqual(@as(usize, 2), clock_names.len);
-        testing.expectEqualSlices(u8, "uartclk", clock_names[0]);
-        testing.expectEqualSlices(u8, "apb_pclk", clock_names[1]);
+        try testing.expectEqual(@as(usize, 2), clock_names.len);
+        try testing.expectEqualSlices(u8, "uartclk", clock_names[0]);
+        try testing.expectEqualSlices(u8, "apb_pclk", clock_names[1]);
         const clocks = pl011.prop(.Clocks).?;
-        testing.expectEqual(@as(usize, 2), clocks.len);
-        testing.expectEqualSlices(u32, &.{0x8000}, clocks[0]);
-        testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
+        try testing.expectEqual(@as(usize, 2), clocks.len);
+        try testing.expectEqualSlices(u32, &.{0x8000}, clocks[0]);
+        try testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
 
         // Make sure this works (and that the code gets compiled).
         std.debug.print("{}\n", .{qemu_arm64});
@@ -414,33 +424,33 @@ test "parse" {
 
         // This ROCKPro64 DTB has a serial at 0xff1a0000.
         const serial = rockpro64.child("serial@ff1a0000").?;
-        testing.expectEqualSlices([2]u128, &.{.{ 0xff1a0000, 0x100 }}, serial.prop(.Reg).?);
-        testing.expectEqual(PropStatus.Okay, serial.prop(.Status).?);
-        testing.expectEqual(@as(u32, 2), serial.prop(.RegShift).?);
-        testing.expectEqual(@as(u32, 0x2e), serial.prop(.PHandle).?);
+        try testing.expectEqualSlices([2]u128, &.{.{ 0xff1a0000, 0x100 }}, serial.prop(.Reg).?);
+        try testing.expectEqual(PropStatus.Okay, serial.prop(.Status).?);
+        try testing.expectEqual(@as(u32, 2), serial.prop(.RegShift).?);
+        try testing.expectEqual(@as(u32, 0x2e), serial.prop(.PHandle).?);
 
         const compatible = serial.prop(.Compatible).?;
-        testing.expectEqual(@as(usize, 2), compatible.len);
-        testing.expectEqualStrings("rockchip,rk3399-uart", compatible[0]);
-        testing.expectEqualStrings("snps,dw-apb-uart", compatible[1]);
+        try testing.expectEqual(@as(usize, 2), compatible.len);
+        try testing.expectEqualStrings("rockchip,rk3399-uart", compatible[0]);
+        try testing.expectEqualStrings("snps,dw-apb-uart", compatible[1]);
 
         const interrupts = serial.prop(.Interrupts).?;
-        testing.expectEqual(@as(usize, 1), interrupts.len);
+        try testing.expectEqual(@as(usize, 1), interrupts.len);
         // GICv3 specifies 4 interrupt cells. This defines an SPI-type
         // interrupt, IRQ 100, level triggered. The last field must be zero
         // for SPI interrupts.
-        testing.expectEqualSlices(u32, &.{ 0x0, 0x64, 0x04, 0x00 }, interrupts[0]);
+        try testing.expectEqualSlices(u32, &.{ 0x0, 0x64, 0x04, 0x00 }, interrupts[0]);
 
         // Test that we refer to the clock controller's clock cells (1) correctly.
-        testing.expectEqual(@as(u32, 1), rockpro64.propAt(&.{"clock-controller@ff760000"}, .ClockCells).?);
+        try testing.expectEqual(@as(u32, 1), rockpro64.propAt(&.{"clock-controller@ff760000"}, .ClockCells).?);
         const clock_names = serial.prop(.ClockNames).?;
-        testing.expectEqual(@as(usize, 2), clock_names.len);
-        testing.expectEqualSlices(u8, "baudclk", clock_names[0]);
-        testing.expectEqualSlices(u8, "apb_pclk", clock_names[1]);
+        try testing.expectEqual(@as(usize, 2), clock_names.len);
+        try testing.expectEqualSlices(u8, "baudclk", clock_names[0]);
+        try testing.expectEqualSlices(u8, "apb_pclk", clock_names[1]);
         const clocks = serial.prop(.Clocks).?;
-        testing.expectEqual(@as(usize, 2), clocks.len);
-        testing.expectEqualSlices(u32, &.{ 0x85, 0x53 }, clocks[0]);
-        testing.expectEqualSlices(u32, &.{ 0x85, 0x162 }, clocks[1]);
+        try testing.expectEqual(@as(usize, 2), clocks.len);
+        try testing.expectEqualSlices(u32, &.{ 0x85, 0x53 }, clocks[0]);
+        try testing.expectEqualSlices(u32, &.{ 0x85, 0x162 }, clocks[1]);
 
         // Print it out.
         std.debug.print("{}\n", .{rockpro64});
@@ -452,11 +462,11 @@ test "Traverser" {
     try qemu_arm64.init(qemu_arm64_dtb);
 
     var state: union(enum) { OutsidePl011, InsidePl011 } = .OutsidePl011;
-    var ev = try qemu_arm64.current();
+    var ev = try qemu_arm64.event();
 
     var reg_value: ?[]const u8 = null;
 
-    while (ev != .End) : (ev = try qemu_arm64.next()) {
+    while (ev != .End) : (ev = try qemu_arm64.event()) {
         switch (state) {
             .OutsidePl011 => if (ev == .BeginNode and std.mem.startsWith(u8, ev.BeginNode, "pl011@")) {
                 state = .InsidePl011;
@@ -471,5 +481,5 @@ test "Traverser" {
         }
     }
 
-    std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0x09, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0 }, reg_value.?);
+    try testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0x09, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0 }, reg_value.?);
 }

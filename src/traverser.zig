@@ -1,12 +1,13 @@
 const std = @import("std");
-usingnamespace @import("util.zig");
-usingnamespace @import("fdt.zig");
+const util = @import("util.zig");
+const fdt = @import("fdt.zig");
 
 pub const Error = error{
     Truncated,
     BadMagic,
     UnsupportedVersion,
     BadStructure,
+    EOF,
     Internal,
 };
 
@@ -18,8 +19,10 @@ pub const Event = union(enum) {
 };
 
 pub const State = union(enum) {
-    Event: Event,
-    Error: Error,
+    Init,
+    Depth: usize,
+    AtEnd,
+    Ended,
 };
 
 pub const Prop = struct {
@@ -30,165 +33,147 @@ pub const Prop = struct {
 pub const Traverser = struct {
     const Self = @This();
 
-    state: State = .{ .Error = error.Internal },
-    frame: @Frame(traverse) = undefined,
+    blob: []const u8,
+    header: fdt.FDTHeader,
+    offset: usize,
+    state: State,
 
-    pub fn init(self: *Self, fdt: []const u8) Error!void {
-        self.frame = async traverse(fdt, &self.state);
-        switch (try self.current()) {
+    pub fn init(self: *Self, blob: []const u8) Error!void {
+        if (blob.len < @sizeOf(fdt.FDTHeader)) {
+            return error.Truncated;
+        }
+
+        self.blob = blob;
+
+        const header = util.structBigToNative(fdt.FDTHeader, @ptrCast(*align(1) const fdt.FDTHeader, blob.ptr).*);
+        if (header.magic != fdt.FDTMagic) {
+            return error.BadMagic;
+        }
+        if (blob.len < header.totalsize) {
+            return error.Truncated;
+        }
+        if (header.version != 17) {
+            return error.UnsupportedVersion;
+        }
+
+        self.header = header;
+        self.offset = header.off_dt_struct;
+        self.state = .Init;
+
+        switch (self.token()) {
             .BeginNode => {},
-            else => return error.Internal,
+            else => return error.BadStructure,
         }
     }
 
-    pub fn current(self: *Self) Error!Event {
+    pub fn event(self: *Self) Error!Event {
         switch (self.state) {
-            .Event => |ev| return ev,
-            .Error => |err| return err,
+            .Init => {
+                const node_name = self.cstring();
+                self.alignTo(u32);
+                self.state = .{ .Depth = 0 };
+                return .{ .BeginNode = node_name };
+            },
+            .Depth => |depth| {
+                while (true) {
+                    switch (self.token()) {
+                        .BeginNode => {
+                            const node_name = self.cstring();
+                            self.alignTo(u32);
+                            self.state = .{ .Depth = depth + 1 };
+                            return .{ .BeginNode = node_name };
+                        },
+                        .EndNode => {
+                            if (depth > 0) {
+                                self.state = .{ .Depth = depth - 1 };
+                            } else {
+                                self.state = .AtEnd;
+                            }
+                            return .EndNode;
+                        },
+                        .Prop => {
+                            const prop = self.object(fdt.FDTProp);
+                            const prop_name = self.cstringFromSectionOffset(prop.nameoff);
+                            const prop_value = self.buffer(prop.len);
+                            self.alignTo(u32);
+                            return .{
+                                .Prop = .{
+                                    .name = prop_name,
+                                    .value = prop_value,
+                                },
+                            };
+                        },
+                        .Nop => {},
+                        .End => {
+                            return error.BadStructure;
+                        },
+                    }
+                }
+            },
+            .AtEnd => {
+                if (self.token() != .End) {
+                    return error.BadStructure;
+                }
+
+                if (self.offset != self.header.off_dt_struct + self.header.size_dt_struct) {
+                    return error.BadStructure;
+                }
+
+                self.state = .Ended;
+                return .End;
+            },
+            .Ended => return error.EOF,
         }
     }
 
-    pub fn next(self: *Self) Error!Event {
-        resume self.frame;
-        return self.current();
+    fn aligned(self: *Self, comptime T: type) T {
+        const size = @sizeOf(T);
+        // XXX: Choosing to work out neater solutions to this later.
+        const value = @ptrCast(*align(1) const T, self.blob[self.offset .. self.offset + size]).*;
+        self.offset += size;
+        return value;
+    }
+
+    fn token(self: *Self) fdt.FDTToken {
+        return @intToEnum(fdt.FDTToken, std.mem.bigToNative(u32, self.aligned(u32)));
+    }
+
+    fn buffer(self: *Self, length: usize) []const u8 {
+        const value = self.blob[self.offset .. self.offset + length];
+        self.offset += length;
+        return value;
+    }
+
+    fn object(self: *Self, comptime T: type) T {
+        return util.structBigToNative(T, self.aligned(T));
+    }
+
+    fn cstring(self: *Self) []const u8 {
+        const length = std.mem.len(@ptrCast([*c]const u8, self.blob[self.offset..]));
+        const value = self.blob[self.offset .. self.offset + length];
+        self.offset += length + 1;
+        return value;
+    }
+
+    fn cstringFromSectionOffset(self: Self, offset: usize) []const u8 {
+        const length = std.mem.len(@ptrCast([*c]const u8, self.blob[self.header.off_dt_strings + offset ..]));
+        return self.blob[self.header.off_dt_strings + offset ..][0..length];
+    }
+
+    fn alignTo(self: *Self, comptime T: type) void {
+        // std.mem.alignForward(&self.offset, @sizeOf(T));
+        self.offset += @sizeOf(T) - 1;
+        self.offset &= ~@as(usize, @sizeOf(T) - 1);
     }
 };
 
 /// Try to carefully extract the total size of an FDT at this address.
-pub fn totalSize(fdt: *c_void) Error!u32 {
-    const header_ptr = @ptrCast(*const FDTHeader, fdt);
+pub fn totalSize(blob: *anyopaque) Error!u32 {
+    const header_ptr = @ptrCast(*const fdt.FDTHeader, blob);
 
-    if (std.mem.bigToNative(u32, header_ptr.magic) != FDTMagic) {
+    if (std.mem.bigToNative(u32, header_ptr.magic) != fdt.FDTMagic) {
         return error.BadMagic;
     }
 
     return std.mem.bigToNative(u32, header_ptr.totalsize);
 }
-
-pub fn traverse(fdt: []const u8, state: *State) void {
-    if (fdt.len < @sizeOf(FDTHeader)) {
-        state.* = .{ .Error = error.Truncated };
-        return;
-    }
-
-    const header = structBigToNative(FDTHeader, @ptrCast(*const FDTHeader, fdt.ptr).*);
-    if (header.magic != FDTMagic) {
-        state.* = .{ .Error = error.BadMagic };
-        return;
-    }
-    if (fdt.len < header.totalsize) {
-        state.* = .{ .Error = error.Truncated };
-        return;
-    }
-    if (header.version != 17) {
-        state.* = .{ .Error = error.UnsupportedVersion };
-        return;
-    }
-
-    var traverser = InternalTraverser{ .fdt = fdt, .header = header, .offset = header.off_dt_struct };
-    if (traverser.token() != .BeginNode) {
-        state.* = .{ .Error = error.BadStructure };
-        return;
-    }
-
-    {
-        const node_name = traverser.cstring();
-        traverser.alignTo(u32);
-        state.* = .{ .Event = .{ .BeginNode = node_name } };
-        suspend {}
-    }
-
-    var depth: usize = 1;
-    while (depth > 0) {
-        switch (traverser.token()) {
-            .BeginNode => {
-                depth += 1;
-                const node_name = traverser.cstring();
-                traverser.alignTo(u32);
-                state.* = .{ .Event = .{ .BeginNode = node_name } };
-                suspend {}
-            },
-            .EndNode => {
-                depth -= 1;
-                state.* = .{ .Event = .EndNode };
-                suspend {}
-            },
-            .Prop => {
-                const prop = traverser.object(FDTProp);
-                const prop_name = traverser.cstringFromSectionOffset(prop.nameoff);
-                const prop_value = traverser.buffer(prop.len);
-                state.* = .{
-                    .Event = .{
-                        .Prop = .{
-                            .name = prop_name,
-                            .value = prop_value,
-                        },
-                    },
-                };
-                suspend {}
-                traverser.alignTo(u32);
-            },
-            .Nop => {},
-            .End => {
-                state.* = .{ .Error = error.BadStructure };
-                return;
-            },
-        }
-    }
-
-    if (traverser.token() != .End) {
-        state.* = .{ .Error = error.BadStructure };
-        return;
-    }
-    if (traverser.offset != header.off_dt_struct + header.size_dt_struct) {
-        state.* = .{ .Error = error.BadStructure };
-        return;
-    }
-
-    state.* = .{ .Event = .End };
-}
-
-/// ---
-const InternalTraverser = struct {
-    fdt: []const u8,
-    header: FDTHeader,
-    offset: usize,
-
-    fn aligned(traverser: *@This(), comptime T: type) T {
-        const size = @sizeOf(T);
-        const value = @ptrCast(*const T, @alignCast(@alignOf(T), traverser.fdt[traverser.offset .. traverser.offset + size])).*;
-        traverser.offset += size;
-        return value;
-    }
-
-    fn buffer(traverser: *@This(), length: usize) []const u8 {
-        const value = traverser.fdt[traverser.offset .. traverser.offset + length];
-        traverser.offset += length;
-        return value;
-    }
-
-    fn token(traverser: *@This()) FDTToken {
-        return @intToEnum(FDTToken, std.mem.bigToNative(u32, traverser.aligned(u32)));
-    }
-
-    fn object(traverser: *@This(), comptime T: type) T {
-        return structBigToNative(T, traverser.aligned(T));
-    }
-
-    fn cstring(traverser: *@This()) []const u8 {
-        const length = std.mem.lenZ(@ptrCast([*c]const u8, traverser.fdt[traverser.offset..]));
-        const value = traverser.fdt[traverser.offset .. traverser.offset + length];
-        traverser.offset += length + 1;
-        return value;
-    }
-
-    fn cstringFromSectionOffset(traverser: @This(), offset: usize) []const u8 {
-        const length = std.mem.lenZ(@ptrCast([*c]const u8, traverser.fdt[traverser.header.off_dt_strings + offset ..]));
-        return traverser.fdt[traverser.header.off_dt_strings + offset ..][0..length];
-    }
-
-    fn alignTo(traverser: *@This(), comptime T: type) void {
-        traverser.offset += @sizeOf(T) - 1;
-        traverser.offset &= ~@as(usize, @sizeOf(T) - 1);
-    }
-};

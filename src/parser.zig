@@ -9,18 +9,18 @@ pub const Error = traverser.Error || std.mem.Allocator.Error || error{
     BadValue,
 };
 
-pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
+pub fn parse(allocator: std.mem.Allocator, blob: []const u8) Error!*dtb.Node {
     var parser: Parser = undefined;
-    try parser.init(allocator, fdt);
+    try parser.init(allocator, blob);
 
     var root =
-        switch (try parser.traverser.current()) {
+        switch (try parser.traverser.event()) {
         .BeginNode => |node_name| try parser.handleNode(node_name, null, null),
         else => return error.BadStructure,
     };
     errdefer root.deinit(allocator);
 
-    switch (try parser.traverser.next()) {
+    switch (try parser.traverser.event()) {
         .End => {},
         else => return error.Internal,
     }
@@ -34,15 +34,15 @@ pub fn parse(allocator: *std.mem.Allocator, fdt: []const u8) Error!*dtb.Node {
 const Parser = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator = undefined,
+    allocator: std.mem.Allocator = undefined,
     traverser: traverser.Traverser = undefined,
 
-    fn init(self: *Self, allocator: *std.mem.Allocator, fdt: []const u8) !void {
+    fn init(self: *Self, allocator: std.mem.Allocator, blob: []const u8) !void {
         self.* = Parser{
             .allocator = allocator,
-            .traverser = .{},
+            .traverser = undefined,
         };
-        try self.traverser.init(fdt);
+        try self.traverser.init(blob);
     }
 
     fn handleNode(self: *Self, node_name: []const u8, root: ?*dtb.Node, parent: ?*dtb.Node) Error!*dtb.Node {
@@ -64,7 +64,7 @@ const Parser = struct {
         errdefer self.allocator.destroy(node);
 
         while (true) {
-            switch (try self.traverser.next()) {
+            switch (try self.traverser.event()) {
                 .BeginNode => |child_name| {
                     var subnode = try self.handleNode(child_name, root orelse node, node);
                     errdefer subnode.deinit(self.allocator);
@@ -83,10 +83,10 @@ const Parser = struct {
         }
         node.* = .{
             .name = node_name,
-            .props = props.toOwnedSlice(),
+            .props = try props.toOwnedSlice(),
             .root = root orelse node,
             .parent = parent,
-            .children = children.toOwnedSlice(),
+            .children = try children.toOwnedSlice(),
         };
         return node;
     }
@@ -175,7 +175,7 @@ const Parser = struct {
         var offset: usize = 0;
         var strings_i: usize = 0;
         while (offset < value.len) : (strings_i += 1) {
-            const len = std.mem.lenZ(@ptrCast([*c]const u8, value[offset..]));
+            const len = std.mem.len(@ptrCast([*c]const u8, value[offset..]));
             strings[strings_i] = value[offset .. offset + len];
             offset += len + 1;
         }
@@ -196,7 +196,7 @@ const Parser = struct {
 
 // ---
 
-fn resolve(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node) Error!void {
+fn resolve(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node) Error!void {
     for (current.*.props) |*prop| {
         switch (prop.*) {
             .Unresolved => |unres| {
@@ -211,7 +211,7 @@ fn resolve(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node) E
     }
 }
 
-fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Node, unres: dtb.PropUnresolved) !dtb.Prop {
+fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node, unres: dtb.PropUnresolved) !dtb.Prop {
     switch (unres) {
         .Reg => |v| {
             const address_cells = (current.parent orelse return error.BadStructure).addressCells() orelse return error.MissingCells;
@@ -248,7 +248,7 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
                 groups.appendAssumeCapacity(group);
             }
 
-            return dtb.Prop{ .Interrupts = groups.toOwnedSlice() };
+            return dtb.Prop{ .Interrupts = try groups.toOwnedSlice() };
         },
         .Clocks,
         .AssignedClocks,
@@ -278,8 +278,8 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
             }
 
             return switch (unres) {
-                .Clocks => dtb.Prop{ .Clocks = groups.toOwnedSlice() },
-                .AssignedClocks => dtb.Prop{ .AssignedClocks = groups.toOwnedSlice() },
+                .Clocks => dtb.Prop{ .Clocks = try groups.toOwnedSlice() },
+                .AssignedClocks => dtb.Prop{ .AssignedClocks = try groups.toOwnedSlice() },
                 else => unreachable,
             };
         },
@@ -289,7 +289,7 @@ fn resolveProp(allocator: *std.mem.Allocator, root: *dtb.Node, current: *dtb.Nod
 // ---
 const READ_ARRAY_RETURN = u128;
 
-fn readArray(allocator: *std.mem.Allocator, value: []const u8, comptime elem_count: usize, elems: [elem_count]u32) Error![][elem_count]READ_ARRAY_RETURN {
+fn readArray(allocator: std.mem.Allocator, value: []const u8, comptime elem_count: usize, elems: [elem_count]u32) Error![][elem_count]READ_ARRAY_RETURN {
     const big_endian_cells = try cellsBigEndian(value);
     var elems_sum: usize = 0;
     for (elems) |elem| {
