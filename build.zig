@@ -1,8 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    b.addModule(.{
-        .name = "dtb",
+    _ = b.addModule("dtb", .{
         .source_file = .{ .path = "src/dtb.zig" },
     });
 

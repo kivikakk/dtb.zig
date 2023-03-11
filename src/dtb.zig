@@ -171,7 +171,7 @@ pub const Prop = union(enum) {
             .RegShift => |v| try std.fmt.format(writer, "reg-shift: 0x{x:0>2}", .{v}),
             .Reg => |v| {
                 try writer.writeAll("reg: <");
-                for (v) |pair, i| {
+                for (v, 0..) |pair, i| {
                     if (i != 0) {
                         try writer.writeAll(">, <");
                     }
@@ -181,7 +181,7 @@ pub const Prop = union(enum) {
             },
             .Ranges => |v| {
                 try writer.writeAll("ranges: <");
-                for (v) |triple, i| {
+                for (v, 0..) |triple, i| {
                     if (i != 0) {
                         try writer.writeAll(">, <");
                     }
@@ -195,11 +195,11 @@ pub const Prop = union(enum) {
             .InterruptParent => |v| try std.fmt.format(writer, "interrupt-parent: <0x{x:0>2}>", .{v}),
             .Interrupts => |groups| {
                 try writer.writeAll("interrupts: <");
-                for (groups) |group, i| {
+                for (groups, 0..) |group, i| {
                     if (i != 0) {
                         try writer.writeAll(">, <");
                     }
-                    for (group) |item, j| {
+                    for (group, 0..) |item, j| {
                         if (j != 0) {
                             try writer.writeAll(" ");
                         }
@@ -216,11 +216,11 @@ pub const Prop = union(enum) {
                     .AssignedClocks => try writer.writeAll("assigned-clocks: <"),
                     else => unreachable,
                 }
-                for (groups) |group, i| {
+                for (groups, 0..) |group, i| {
                     if (i != 0) {
                         try writer.writeAll(">, <");
                     }
-                    for (group) |item, j| {
+                    for (group, 0..) |item, j| {
                         if (j != 0) {
                             try writer.writeAll(" ");
                         }
@@ -242,7 +242,7 @@ pub const Prop = union(enum) {
                     .Pinctrl2 => "2",
                     else => unreachable,
                 }});
-                for (phandles) |phandle, i| {
+                for (phandles, 0..) |phandle, i| {
                     if (i != 0) {
                         try writer.writeAll(" ");
                     }
@@ -252,7 +252,7 @@ pub const Prop = union(enum) {
             },
             .AssignedClockRates => |clock_rates| {
                 try writer.writeAll("assigned-clock-rates: <");
-                for (clock_rates) |clock_rate, i| {
+                for (clock_rates, 0..) |clock_rate, i| {
                     if (i != 0) {
                         try writer.writeAll(" ");
                     }
@@ -301,7 +301,7 @@ pub const Prop = union(enum) {
             _ = fmt;
             _ = options;
             try writer.writeByte('"');
-            for (this.string_list) |s, i| {
+            for (this.string_list, 0..) |s, i| {
                 if (i != 0) {
                     try writer.writeAll("\", \"");
                 }
