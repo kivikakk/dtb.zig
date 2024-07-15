@@ -60,7 +60,7 @@ const Parser = struct {
             children.deinit();
         }
 
-        var node = try self.allocator.create(dtb.Node);
+        const node = try self.allocator.create(dtb.Node);
         errdefer self.allocator.destroy(node);
 
         while (true) {
@@ -147,7 +147,7 @@ const Parser = struct {
 
     fn integer(comptime T: type, value: []const u8) !T {
         if (value.len != @sizeOf(T)) return error.BadStructure;
-        return std.mem.bigToNative(T, @ptrCast(*const T, @alignCast(@alignOf(T), value.ptr)).*);
+        return std.mem.bigToNative(T, @as(*const T, @alignCast(@ptrCast(value.ptr))).*);
     }
 
     fn integerList(self: *Parser, comptime T: type, value: []const u8) ![]T {
@@ -155,7 +155,7 @@ const Parser = struct {
         var list = try self.allocator.alloc(T, value.len / @sizeOf(T));
         var i: usize = 0;
         while (i < list.len) : (i += 1) {
-            list[i] = std.mem.bigToNative(T, @ptrCast(*const T, @alignCast(@alignOf(T), value[i * @sizeOf(T) ..].ptr)).*);
+            list[i] = std.mem.bigToNative(T, @as(*const T, @alignCast(@ptrCast(value[i * @sizeOf(T) ..].ptr))).*);
         }
         return list;
     }
@@ -175,7 +175,7 @@ const Parser = struct {
         var offset: usize = 0;
         var strings_i: usize = 0;
         while (offset < value.len) : (strings_i += 1) {
-            const len = std.mem.len(@ptrCast([*c]const u8, value[offset..]));
+            const len = std.mem.len(@as([*c]const u8, @ptrCast(value[offset..])));
             strings[strings_i] = value[offset .. offset + len];
             offset += len + 1;
         }
@@ -325,5 +325,5 @@ fn readArray(allocator: std.mem.Allocator, value: []const u8, comptime elem_coun
 
 fn cellsBigEndian(value: []const u8) ![]const u32 {
     if (value.len % @sizeOf(u32) != 0) return error.BadStructure;
-    return @ptrCast([*]const u32, @alignCast(@alignOf(u32), value))[0 .. value.len / @sizeOf(u32)];
+    return @as([*]const u32, @alignCast(@ptrCast(value)))[0 .. value.len / @sizeOf(u32)];
 }

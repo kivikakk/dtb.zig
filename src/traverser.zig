@@ -45,7 +45,7 @@ pub const Traverser = struct {
 
         self.blob = blob;
 
-        const header = util.structBigToNative(fdt.FDTHeader, @ptrCast(*align(1) const fdt.FDTHeader, blob.ptr).*);
+        const header = util.structBigToNative(fdt.FDTHeader, @as(*align(1) const fdt.FDTHeader, @ptrCast(blob.ptr)).*);
         if (header.magic != fdt.FDTMagic) {
             return error.BadMagic;
         }
@@ -129,13 +129,13 @@ pub const Traverser = struct {
     fn aligned(self: *Self, comptime T: type) T {
         const size = @sizeOf(T);
         // XXX: Choosing to work out neater solutions to this later.
-        const value = @ptrCast(*align(1) const T, self.blob[self.offset .. self.offset + size]).*;
+        const value = @as(*align(1) const T, @ptrCast(self.blob[self.offset .. self.offset + size])).*;
         self.offset += size;
         return value;
     }
 
     fn token(self: *Self) fdt.FDTToken {
-        return @intToEnum(fdt.FDTToken, std.mem.bigToNative(u32, self.aligned(u32)));
+        return @as(fdt.FDTToken, @enumFromInt(std.mem.bigToNative(u32, self.aligned(u32))));
     }
 
     fn buffer(self: *Self, length: usize) []const u8 {
@@ -149,14 +149,14 @@ pub const Traverser = struct {
     }
 
     fn cstring(self: *Self) []const u8 {
-        const length = std.mem.len(@ptrCast([*c]const u8, self.blob[self.offset..]));
+        const length = std.mem.len(@as([*c]const u8, @ptrCast(self.blob[self.offset..])));
         const value = self.blob[self.offset .. self.offset + length];
         self.offset += length + 1;
         return value;
     }
 
     fn cstringFromSectionOffset(self: Self, offset: usize) []const u8 {
-        const length = std.mem.len(@ptrCast([*c]const u8, self.blob[self.header.off_dt_strings + offset ..]));
+        const length = std.mem.len(@as([*c]const u8, @ptrCast(self.blob[self.header.off_dt_strings + offset ..])));
         return self.blob[self.header.off_dt_strings + offset ..][0..length];
     }
 
@@ -169,7 +169,7 @@ pub const Traverser = struct {
 
 /// Try to carefully extract the total size of an FDT at this address.
 pub fn totalSize(blob: *anyopaque) Error!u32 {
-    const header_ptr = @ptrCast(*align(1) const fdt.FDTHeader, blob);
+    const header_ptr = @as(*align(1) const fdt.FDTHeader, @ptrCast(blob));
 
     if (std.mem.bigToNative(u32, header_ptr.magic) != fdt.FDTMagic) {
         return error.BadMagic;

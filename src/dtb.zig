@@ -96,7 +96,7 @@ pub const Node = struct {
         try node.formatNode(writer, 0);
     }
 
-    fn formatNode(node: Node, writer: anytype, depth: usize) std.os.WriteError!void {
+    fn formatNode(node: Node, writer: anytype, depth: usize) !void {
         try indent(writer, depth);
         try std.fmt.format(writer, "Node <{'}>\n", .{std.zig.fmtEscapes(node.name)});
         for (node.props) |p| {
@@ -278,11 +278,11 @@ pub const Prop = union(enum) {
             _ = fmt;
             _ = options;
             if (this.freq / 1_000_000_000 > 0) {
-                try std.fmt.format(writer, "{d}GHz", .{@intToFloat(f32, this.freq / 1_000_000) / 1_000});
+                try std.fmt.format(writer, "{d}GHz", .{@as(f32, @floatFromInt(this.freq / 1_000_000)) / 1_000});
             } else if (this.freq / 1_000_000 > 0) {
-                try std.fmt.format(writer, "{d}MHz", .{@intToFloat(f32, this.freq / 1_000) / 1_000});
+                try std.fmt.format(writer, "{d}MHz", .{@as(f32, @floatFromInt(this.freq / 1_000)) / 1_000});
             } else if (this.freq / 1_000 > 0) {
-                try std.fmt.format(writer, "{d}kHz", .{@intToFloat(f32, this.freq) / 1_000});
+                try std.fmt.format(writer, "{d}kHz", .{@as(f32, @floatFromInt(this.freq)) / 1_000});
             } else {
                 try std.fmt.format(writer, "{}Hz", .{this.freq});
             }
