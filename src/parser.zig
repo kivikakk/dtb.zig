@@ -226,12 +226,13 @@ fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node
         },
         .Interrupts => |v| {
             const interrupt_cells = current.interruptCells() orelse return error.MissingCells;
-            const big_endian_cells = try cellsBigEndian(v);
-            if (big_endian_cells.len % interrupt_cells != 0) {
+            const cs = try cells(allocator, v);
+            defer allocator.free(cs);
+            if (cs.len % interrupt_cells != 0) {
                 return error.BadStructure;
             }
 
-            const group_count = big_endian_cells.len / interrupt_cells;
+            const group_count = cs.len / interrupt_cells;
             var groups = try std.ArrayList([]u32).initCapacity(allocator, group_count);
             errdefer {
                 for (groups.items) |group| allocator.free(group);
@@ -243,7 +244,7 @@ fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node
                 var group = try allocator.alloc(u32, interrupt_cells);
                 var item_i: usize = 0;
                 while (item_i < interrupt_cells) : (item_i += 1) {
-                    group[item_i] = std.mem.bigToNative(u32, big_endian_cells[group_i * interrupt_cells + item_i]);
+                    group[item_i] = cs[group_i * interrupt_cells + item_i];
                 }
                 groups.appendAssumeCapacity(group);
             }
@@ -253,7 +254,8 @@ fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node
         .Clocks,
         .AssignedClocks,
         => |v| {
-            const big_endian_cells = try cellsBigEndian(v);
+            const cs = try cells(allocator, v);
+            defer allocator.free(cs);
             var groups = std.ArrayList([]u32).init(allocator);
             errdefer {
                 for (groups.items) |group| allocator.free(group);
@@ -261,8 +263,8 @@ fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node
             }
 
             var cell_i: usize = 0;
-            while (cell_i < big_endian_cells.len) {
-                const phandle = std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+            while (cell_i < cs.len) {
+                const phandle = cs[cell_i];
                 cell_i += 1;
                 const target = root.findPHandle(phandle) orelse return error.MissingCells;
                 const clock_cells = target.prop(.ClockCells) orelse return error.MissingCells;
@@ -271,7 +273,7 @@ fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node
                 group[0] = phandle;
                 var item_i: usize = 0;
                 while (item_i < clock_cells) : (item_i += 1) {
-                    group[item_i + 1] = std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+                    group[item_i + 1] = cs[cell_i];
                     cell_i += 1;
                 }
                 try groups.append(group);
@@ -290,7 +292,8 @@ fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node
 const READ_ARRAY_RETURN = u128;
 
 fn readArray(allocator: std.mem.Allocator, value: []const u8, comptime elem_count: usize, elems: [elem_count]u32) Error![][elem_count]READ_ARRAY_RETURN {
-    const big_endian_cells = try cellsBigEndian(value);
+    const cs = try cells(allocator, value);
+    defer allocator.free(cs);
     var elems_sum: usize = 0;
     for (elems) |elem| {
         if (elem > (@sizeOf(READ_ARRAY_RETURN) / @sizeOf(u32))) {
@@ -299,23 +302,23 @@ fn readArray(allocator: std.mem.Allocator, value: []const u8, comptime elem_coun
         elems_sum += elem;
     }
 
-    if (big_endian_cells.len % elems_sum != 0) {
+    if (cs.len % elems_sum != 0) {
         return error.BadStructure;
     }
 
-    var tuples: [][elem_count]READ_ARRAY_RETURN = try allocator.alloc([elem_count]READ_ARRAY_RETURN, big_endian_cells.len / elems_sum);
+    var tuples: [][elem_count]READ_ARRAY_RETURN = try allocator.alloc([elem_count]READ_ARRAY_RETURN, cs.len / elems_sum);
     errdefer allocator.free(tuples);
     var tuple_i: usize = 0;
 
     var cell_i: usize = 0;
-    while (cell_i < big_endian_cells.len) : (tuple_i += 1) {
+    while (cell_i < cs.len) : (tuple_i += 1) {
         var elem_i: usize = 0;
         while (elem_i < elem_count) : (elem_i += 1) {
             var j: usize = undefined;
             tuples[tuple_i][elem_i] = 0;
             j = 0;
             while (j < elems[elem_i]) : (j += 1) {
-                tuples[tuple_i][elem_i] = (tuples[tuple_i][elem_i] << 32) | std.mem.bigToNative(u32, big_endian_cells[cell_i]);
+                tuples[tuple_i][elem_i] = (tuples[tuple_i][elem_i] << 32) | cs[cell_i];
                 cell_i += 1;
             }
         }
@@ -323,7 +326,13 @@ fn readArray(allocator: std.mem.Allocator, value: []const u8, comptime elem_coun
     return tuples;
 }
 
-fn cellsBigEndian(value: []const u8) ![]const u32 {
+fn cells(allocator: std.mem.Allocator, value: []const u8) ![]const u32 {
     if (value.len % @sizeOf(u32) != 0) return error.BadStructure;
-    return @as([*]const u32, @alignCast(@ptrCast(value)))[0 .. value.len / @sizeOf(u32)];
+    const n = value.len / @sizeOf(u32);
+    var r = try allocator.alloc(u32, n);
+    errdefer allocator.free(r);
+    for (0..n) |i| {
+        r[i] = try Parser.integer(u32, value[i * @sizeOf(u32) ..][0..@sizeOf(u32)]);
+    }
+    return r;
 }
