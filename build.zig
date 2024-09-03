@@ -12,7 +12,10 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run the tests");
 
-    test_step.dependOn(&b.addTest(.{
+    const unit_tests = b.addTest(.{
         .root_source_file = b.path("src/dtb.zig"),
-    }).step);
+        .target = target,
+        .optimize = optimize,
+    });
+    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
 }
