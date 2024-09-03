@@ -147,7 +147,7 @@ const Parser = struct {
 
     fn integer(comptime T: type, value: []const u8) !T {
         if (value.len != @sizeOf(T)) return error.BadStructure;
-        return std.mem.bigToNative(T, @as(*const T, @alignCast(@ptrCast(value.ptr))).*);
+        return std.mem.readInt(T, value[0..@sizeOf(T)], .big);
     }
 
     fn integerList(self: *Parser, comptime T: type, value: []const u8) ![]T {
