@@ -455,6 +455,17 @@ test "parse" {
         // Print it out.
         std.debug.print("{}\n", .{rockpro64});
     }
+
+    {
+        // Test non-aligned input.
+        var c = try testing.allocator.allocWithOptions(u8, qemu_arm64_dtb.len + 1, 8, null);
+        defer testing.allocator.free(c);
+
+        @memcpy(c[1 .. qemu_arm64_dtb.len + 1], qemu_arm64_dtb);
+
+        var qemu_arm64 = try parse(std.testing.allocator, c[1..]);
+        defer qemu_arm64.deinit(std.testing.allocator);
+    }
 }
 
 test "Traverser" {
