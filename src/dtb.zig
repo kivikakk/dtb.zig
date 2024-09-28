@@ -390,6 +390,10 @@ test "parse" {
             &.{.{ 1024 * 1024 * 1024, 512 * 1024 * 1024 }},
             qemu_arm64.propAt(&.{"memory@40000000"}, .Reg).?,
         );
+        try testing.expectEqualStrings(
+            "memory",
+            qemu_arm64.propAt(&.{"memory@40000000"}, .DeviceType).?,
+        );
 
         // It has an A53-compatible CPU.
         const compatible = qemu_arm64.propAt(&.{ "cpus", "cpu@0" }, .Compatible).?;
