@@ -130,6 +130,8 @@ const Parser = struct {
             return dtb.Prop{ .Pinctrl2 = try self.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "assigned-clock-rates")) {
             return dtb.Prop{ .AssignedClockRates = try self.integerList(u32, value) };
+        } else if (std.mem.eql(u8, name, "device_type")) {
+            return dtb.Prop{ .DeviceType = string(value) };
         } else if (std.mem.eql(u8, name, "reg")) {
             return dtb.Prop{ .Unresolved = .{ .Reg = value } };
         } else if (std.mem.eql(u8, name, "ranges")) {
@@ -166,6 +168,10 @@ const Parser = struct {
             @sizeOf(u64) => try integer(u64, value),
             else => error.BadStructure,
         };
+    }
+
+    fn string(value: []const u8) []const u8 {
+        return value[0 .. value.len - 1];
     }
 
     fn stringList(self: *Parser, value: []const u8) Error![][]const u8 {
