@@ -165,6 +165,8 @@ pub const Prop = union(enum) {
     AssignedClockRates: []u32,
     AssignedClocks: [][]u32,
     DeviceType: []const u8,
+    LinuxInitrdStart: u64,
+    LinuxInitrdEnd: u64,
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
@@ -270,6 +272,8 @@ pub const Prop = union(enum) {
                 try writer.writeByte('>');
             },
             .DeviceType => |v| try std.fmt.format(writer, "device_type: \"{s}\"", .{v}),
+            .LinuxInitrdStart => |v| try std.fmt.format(writer, "linux,initrd-start: 0x{x:0>2}", .{v}),
+            .LinuxInitrdEnd => |v| try std.fmt.format(writer, "linux,initrd-end: 0x{x:0>2}", .{v}),
             .Unresolved => |_| try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try std.fmt.format(writer, "{'}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
         }
@@ -364,6 +368,8 @@ pub const Prop = union(enum) {
             .ClockFrequency,
             .RegIoWidth,
             .DeviceType,
+            .LinuxInitrdStart,
+            .LinuxInitrdEnd,
             => {},
         }
     }
