@@ -106,6 +106,8 @@ const Parser = struct {
             return dtb.Prop{ .Status = try status(value) };
         } else if (std.mem.eql(u8, name, "phandle")) {
             return dtb.Prop{ .PHandle = try integer(u32, value) };
+        } else if (std.mem.eql(u8, name, "interrupt-controller")) {
+            return .InterruptController;
         } else if (std.mem.eql(u8, name, "interrupt-parent")) {
             return dtb.Prop{ .InterruptParent = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "compatible")) {
