@@ -40,12 +40,18 @@ pub const Node = struct {
     }
 
     pub fn interruptCells(node: *Node) ?u32 {
+        if (node.interruptParent()) |ip| {
+            if (ip.prop(.InterruptCells)) |ic| {
+                return ic;
+            } else {
+                return ip.interruptCells();
+            }
+        }
+
         if (node.prop(.InterruptCells)) |ic| {
             return ic;
         }
-        if (node.interruptParent()) |ip| {
-            return ip.interruptCells();
-        }
+
         return null;
     }
 
