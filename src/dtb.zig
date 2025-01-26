@@ -155,6 +155,7 @@ pub const Prop = union(enum) {
     ClockNames: [][]const u8,
     ClockOutputNames: [][]const u8,
     ClockFrequency: u64,
+    InterruptController: void,
     InterruptNames: [][]const u8,
     RegIoWidth: u64,
     PinctrlNames: [][]const u8,
@@ -199,6 +200,7 @@ pub const Prop = union(enum) {
             .Compatible => |v| try (StringListFormatter{ .string_list = v }).write("compatible: ", writer),
             .Status => |v| try std.fmt.format(writer, "status: \"{s}\"", .{v}),
             .PHandle => |v| try std.fmt.format(writer, "phandle: <0x{x:0>2}>", .{v}),
+            .InterruptController => try std.fmt.format(writer, "interrupt-controller", .{}),
             .InterruptParent => |v| try std.fmt.format(writer, "interrupt-parent: <0x{x:0>2}>", .{v}),
             .Interrupts => |groups| {
                 try writer.writeAll("interrupts: <");
@@ -354,6 +356,7 @@ pub const Prop = union(enum) {
             .ClockCells,
             .RegShift,
             .PHandle,
+            .InterruptController,
             .InterruptParent,
             .Status,
             .Unresolved,
@@ -400,6 +403,8 @@ test "parse" {
             "memory",
             qemu_arm64.propAt(&.{"memory@40000000"}, .DeviceType).?,
         );
+
+        try testing.expect(qemu_arm64.propAt(&.{ "intc@8000000" }, .InterruptController) != null);
 
         // It has an A53-compatible CPU.
         const compatible = qemu_arm64.propAt(&.{ "cpus", "cpu@0" }, .Compatible).?;
