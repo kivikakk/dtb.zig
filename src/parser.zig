@@ -134,6 +134,10 @@ const Parser = struct {
             return dtb.Prop{ .AssignedClockRates = try self.integerList(u32, value) };
         } else if (std.mem.eql(u8, name, "device_type")) {
             return dtb.Prop{ .DeviceType = string(value) };
+        } else if (std.mem.eql(u8, name, "linux,initrd-start")) {
+            return dtb.Prop{ .LinuxInitrdStart = try integer(u32, value) };
+        } else if (std.mem.eql(u8, name, "linux,initrd-end")) {
+            return dtb.Prop{ .LinuxInitrdEnd = try integer(u32, value) };
         } else if (std.mem.eql(u8, name, "reg")) {
             return dtb.Prop{ .Unresolved = .{ .Reg = value } };
         } else if (std.mem.eql(u8, name, "ranges")) {
