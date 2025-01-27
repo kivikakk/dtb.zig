@@ -452,12 +452,25 @@ test "parse" {
         try testing.expectEqualStrings("rockchip,rk3399-uart", compatible[0]);
         try testing.expectEqualStrings("snps,dw-apb-uart", compatible[1]);
 
+        // Check GICv3 has four interrupt cells
+        const gic = rockpro64.child("interrupt-controller@fee00000").?;
+        try testing.expectEqual(gic.interruptCells(), 4);
+
         const interrupts = serial.prop(.Interrupts).?;
         try testing.expectEqual(@as(usize, 1), interrupts.len);
         // GICv3 specifies 4 interrupt cells. This defines an SPI-type
         // interrupt, IRQ 100, level triggered. The last field must be zero
         // for SPI interrupts.
         try testing.expectEqualSlices(u32, &.{ 0x0, 0x64, 0x04, 0x00 }, interrupts[0]);
+
+        const gpio = rockpro64.child("pinctrl").?.child("gpio0@ff720000").?;
+        const gpio_interrupts = gpio.prop(.Interrupts).?;
+        try testing.expectEqual(1, gpio_interrupts.len);
+        // Check that the interrupt cells for GPIO is what is defined by the GIC, rather
+        // than the interrupt cells on the GPIO node since that is for nodes that have
+        // it as an interrupt parent.
+        try testing.expectEqual(gpio.interruptCells(), 4);
+        try testing.expectEqualSlices(u32, &.{ 0x00, 0x0e, 0x04, 0x00 }, gpio_interrupts[0]);
 
         // Test that we refer to the clock controller's clock cells (1) correctly.
         try testing.expectEqual(@as(u32, 1), rockpro64.propAt(&.{"clock-controller@ff760000"}, .ClockCells).?);
