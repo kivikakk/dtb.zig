@@ -135,9 +135,9 @@ const Parser = struct {
         } else if (std.mem.eql(u8, name, "device_type")) {
             return dtb.Prop{ .DeviceType = string(value) };
         } else if (std.mem.eql(u8, name, "linux,initrd-start")) {
-            return dtb.Prop{ .LinuxInitrdStart = try integer(u32, value) };
+            return dtb.Prop{ .LinuxInitrdStart = try u32OrU64(value) };
         } else if (std.mem.eql(u8, name, "linux,initrd-end")) {
-            return dtb.Prop{ .LinuxInitrdEnd = try integer(u32, value) };
+            return dtb.Prop{ .LinuxInitrdEnd = try u32OrU64(value) };
         } else if (std.mem.eql(u8, name, "reg")) {
             return dtb.Prop{ .Unresolved = .{ .Reg = value } };
         } else if (std.mem.eql(u8, name, "ranges")) {
