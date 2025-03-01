@@ -1,5 +1,5 @@
 .{
-    .name = "dtb.zig",
+    .name = .dtb,
     .version = "0.0.0",
     .dependencies = .{},
 
@@ -10,4 +10,5 @@
         "LICENSE",
         "README.md",
     },
+    .fingerprint = 0x5870066899dd4281
 }
