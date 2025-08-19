@@ -96,25 +96,23 @@ pub const Node = struct {
         allocator.destroy(node);
     }
 
-    pub fn format(node: Node, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(node: Node, writer: *std.Io.Writer) !void {
         try node.formatNode(writer, 0);
     }
 
-    fn formatNode(node: Node, writer: anytype, depth: usize) !void {
+    fn formatNode(node: Node, writer: *std.Io.Writer, depth: usize) !void {
         try indent(writer, depth);
-        try std.fmt.format(writer, "Node <{'}>\n", .{std.zig.fmtEscapes(node.name)});
+        try writer.print("Node <{f}>\n", .{std.zig.fmtString(node.name)});
         for (node.props) |p| {
             try indent(writer, depth + 1);
-            try std.fmt.format(writer, "{}\n", .{p});
+            try writer.print("{f}\n", .{p});
         }
         for (node.children) |c| {
             try c.formatNode(writer, depth + 1);
         }
     }
 
-    fn indent(writer: anytype, depth: usize) !void {
+    fn indent(writer: *std.Io.Writer, depth: usize) !void {
         var i: usize = 0;
         while (i < depth) : (i += 1) {
             try writer.writeAll("  ");
@@ -127,9 +125,7 @@ pub const PropStatus = enum {
     Disabled,
     Fail,
 
-    pub fn format(status: PropStatus, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(status: PropStatus, writer: *std.Io.Writer) !void {
         switch (status) {
             .Okay => try writer.writeAll("okay"),
             .Disabled => try writer.writeAll("disabled"),
@@ -170,22 +166,20 @@ pub const Prop = union(enum) {
     Unresolved: PropUnresolved,
     Unknown: PropUnknown,
 
-    pub fn format(prop: Prop, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(prop: Prop, writer: *std.Io.Writer) !void {
         switch (prop) {
-            .AddressCells => |v| try std.fmt.format(writer, "#address-cells: 0x{x:0>2}", .{v}),
-            .SizeCells => |v| try std.fmt.format(writer, "#size-cells: 0x{x:0>2}", .{v}),
-            .InterruptCells => |v| try std.fmt.format(writer, "#interrupt-cells: 0x{x:0>2}", .{v}),
-            .ClockCells => |v| try std.fmt.format(writer, "#clock-cells: 0x{x:0>2}", .{v}),
-            .RegShift => |v| try std.fmt.format(writer, "reg-shift: 0x{x:0>2}", .{v}),
+            .AddressCells => |v| try writer.print("#address-cells: 0x{x:0>2}", .{v}),
+            .SizeCells => |v| try writer.print("#size-cells: 0x{x:0>2}", .{v}),
+            .InterruptCells => |v| try writer.print("#interrupt-cells: 0x{x:0>2}", .{v}),
+            .ClockCells => |v| try writer.print("#clock-cells: 0x{x:0>2}", .{v}),
+            .RegShift => |v| try writer.print("reg-shift: 0x{x:0>2}", .{v}),
             .Reg => |v| {
                 try writer.writeAll("reg: <");
                 for (v, 0..) |pair, i| {
                     if (i != 0) {
                         try writer.writeAll(">, <");
                     }
-                    try std.fmt.format(writer, "0x{x:0>2} 0x{x:0>2}", .{ pair[0], pair[1] });
+                    try writer.print("0x{x:0>2} 0x{x:0>2}", .{ pair[0], pair[1] });
                 }
                 try writer.writeByte('>');
             },
@@ -195,15 +189,15 @@ pub const Prop = union(enum) {
                     if (i != 0) {
                         try writer.writeAll(">, <");
                     }
-                    try std.fmt.format(writer, "0x{x:0>2} 0x{x:0>2} 0x{x:0>2}", .{ triple[0], triple[1], triple[2] });
+                    try writer.print("0x{x:0>2} 0x{x:0>2} 0x{x:0>2}", .{ triple[0], triple[1], triple[2] });
                 }
                 try writer.writeByte('>');
             },
             .Compatible => |v| try (StringListFormatter{ .string_list = v }).write("compatible: ", writer),
-            .Status => |v| try std.fmt.format(writer, "status: \"{s}\"", .{v}),
-            .PHandle => |v| try std.fmt.format(writer, "phandle: <0x{x:0>2}>", .{v}),
-            .InterruptController => try std.fmt.format(writer, "interrupt-controller", .{}),
-            .InterruptParent => |v| try std.fmt.format(writer, "interrupt-parent: <0x{x:0>2}>", .{v}),
+            .Status => |v| try writer.print("status: \"{f}\"", .{v}),
+            .PHandle => |v| try writer.print("phandle: <0x{x:0>2}>", .{v}),
+            .InterruptController => try writer.print("interrupt-controller", .{}),
+            .InterruptParent => |v| try writer.print("interrupt-parent: <0x{x:0>2}>", .{v}),
             .Interrupts => |groups| {
                 try writer.writeAll("interrupts: <");
                 for (groups, 0..) |group, i| {
@@ -214,7 +208,7 @@ pub const Prop = union(enum) {
                         if (j != 0) {
                             try writer.writeAll(" ");
                         }
-                        try std.fmt.format(writer, "0x{x:0>2}", .{item});
+                        try writer.print("0x{x:0>2}", .{item});
                     }
                 }
                 try writer.writeAll(">");
@@ -235,7 +229,7 @@ pub const Prop = union(enum) {
                         if (j != 0) {
                             try writer.writeAll(" ");
                         }
-                        try std.fmt.format(writer, "0x{x:0>2}", .{item});
+                        try writer.print("0x{x:0>2}", .{item});
                     }
                 }
                 try writer.writeAll(">");
@@ -244,10 +238,10 @@ pub const Prop = union(enum) {
             .ClockOutputNames => |v| try (StringListFormatter{ .string_list = v }).write("clock-output-names: ", writer),
             .ClockFrequency => |v| try (FrequencyFormatter{ .freq = v }).write("clock-frequency: ", writer),
             .InterruptNames => |v| try (StringListFormatter{ .string_list = v }).write("interrupt-names: ", writer),
-            .RegIoWidth => |v| try std.fmt.format(writer, "reg-io-width: 0x{x:0>2}", .{v}),
+            .RegIoWidth => |v| try writer.print("reg-io-width: 0x{x:0>2}", .{v}),
             .PinctrlNames => |v| try (StringListFormatter{ .string_list = v }).write("pinctrl-names: ", writer),
             .Pinctrl0, .Pinctrl1, .Pinctrl2 => |phandles| {
-                try std.fmt.format(writer, "pinctrl{s}: <", .{switch (prop) {
+                try writer.print("pinctrl{s}: <", .{switch (prop) {
                     .Pinctrl0 => "0",
                     .Pinctrl1 => "1",
                     .Pinctrl2 => "2",
@@ -257,7 +251,7 @@ pub const Prop = union(enum) {
                     if (i != 0) {
                         try writer.writeAll(" ");
                     }
-                    try std.fmt.format(writer, "0x{x:0>4}", .{phandle});
+                    try writer.print("0x{x:0>4}", .{phandle});
                 }
                 try writer.writeByte('>');
             },
@@ -271,11 +265,11 @@ pub const Prop = union(enum) {
                 }
                 try writer.writeByte('>');
             },
-            .DeviceType => |v| try std.fmt.format(writer, "device_type: \"{s}\"", .{v}),
-            .LinuxInitrdStart => |v| try std.fmt.format(writer, "linux,initrd-start: 0x{x:0>2}", .{v}),
-            .LinuxInitrdEnd => |v| try std.fmt.format(writer, "linux,initrd-end: 0x{x:0>2}", .{v}),
+            .DeviceType => |v| try writer.print("device_type: \"{s}\"", .{v}),
+            .LinuxInitrdStart => |v| try writer.print("linux,initrd-start: 0x{x:0>2}", .{v}),
+            .LinuxInitrdEnd => |v| try writer.print("linux,initrd-end: 0x{x:0>2}", .{v}),
             .Unresolved => |_| try writer.writeAll("UNRESOLVED"),
-            .Unknown => |v| try std.fmt.format(writer, "{'}: (unk {} bytes) <{}>", .{ std.zig.fmtEscapes(v.name), v.value.len, std.zig.fmtEscapes(v.value) }),
+            .Unknown => |v| try writer.print("{f}: (unk {} bytes) <{f}>", .{ std.zig.fmtString(v.name), v.value.len, std.zig.fmtString(v.value) }),
         }
     }
 
@@ -292,13 +286,13 @@ pub const Prop = union(enum) {
             _ = fmt;
             _ = options;
             if (this.freq / 1_000_000_000 > 0) {
-                try std.fmt.format(writer, "{d}GHz", .{@as(f32, @floatFromInt(this.freq / 1_000_000)) / 1_000});
+                try writer.print("{d}GHz", .{@as(f32, @floatFromInt(this.freq / 1_000_000)) / 1_000});
             } else if (this.freq / 1_000_000 > 0) {
-                try std.fmt.format(writer, "{d}MHz", .{@as(f32, @floatFromInt(this.freq / 1_000)) / 1_000});
+                try writer.print("{d}MHz", .{@as(f32, @floatFromInt(this.freq / 1_000)) / 1_000});
             } else if (this.freq / 1_000 > 0) {
-                try std.fmt.format(writer, "{d}kHz", .{@as(f32, @floatFromInt(this.freq)) / 1_000});
+                try writer.print("{d}kHz", .{@as(f32, @floatFromInt(this.freq)) / 1_000});
             } else {
-                try std.fmt.format(writer, "{}Hz", .{this.freq});
+                try writer.print("{}Hz", .{this.freq});
             }
         }
     };
@@ -439,7 +433,7 @@ test "parse" {
         try testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
 
         // Make sure this works (and that the code gets compiled).
-        std.debug.print("{}\n", .{qemu_arm64});
+        std.debug.print("{f}\n", .{qemu_arm64});
     }
 
     {
@@ -490,12 +484,12 @@ test "parse" {
         try testing.expectEqualSlices(u32, &.{ 0x85, 0x162 }, clocks[1]);
 
         // Print it out.
-        std.debug.print("{}\n", .{rockpro64});
+        std.debug.print("{f}\n", .{rockpro64});
     }
 
     {
         // Test non-aligned input.
-        var c = try testing.allocator.allocWithOptions(u8, qemu_arm64_dtb.len + 1, 8, null);
+        var c = try testing.allocator.allocWithOptions(u8, qemu_arm64_dtb.len + 1, .@"8", null);
         defer testing.allocator.free(c);
 
         @memcpy(c[1 .. qemu_arm64_dtb.len + 1], qemu_arm64_dtb);
