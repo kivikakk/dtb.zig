@@ -1,9 +1,6 @@
 const std = @import("std");
 const dtb = @import("dtb.zig");
-const util = @import("util.zig");
 const traverser = @import("traverser.zig");
-
-const structBigToNative = util.structBigToNative;
 
 pub const Error = traverser.Error || std.mem.Allocator.Error || error{
     MissingCells,
@@ -17,9 +14,9 @@ pub fn parse(allocator: std.mem.Allocator, blob: []const u8) Error!*dtb.Node {
 
     var root =
         switch (try parser.traverser.event()) {
-        .BeginNode => |node_name| try parser.handleNode(node_name, null, null),
-        else => return error.BadStructure,
-    };
+            .BeginNode => |node_name| try parser.handleNode(node_name, null, null),
+            else => return error.BadStructure,
+        };
     errdefer root.deinit(allocator);
 
     switch (try parser.traverser.event()) {
@@ -165,7 +162,7 @@ const Parser = struct {
         var list = try self.allocator.alloc(T, value.len / @sizeOf(T));
         var i: usize = 0;
         while (i < list.len) : (i += 1) {
-            list[i] = std.mem.bigToNative(T, @as(*const T, @alignCast(@ptrCast(value[i * @sizeOf(T) ..].ptr))).*);
+            list[i] = std.mem.bigToNative(T, @as(*const T, @ptrCast(@alignCast(value[i * @sizeOf(T) ..].ptr))).*);
         }
         return list;
     }
