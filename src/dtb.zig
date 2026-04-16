@@ -12,7 +12,7 @@ pub const Node = struct {
     parent: ?*Node,
     children: []*Node,
 
-    pub fn propAt(start: *const Node, path: []const []const u8, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
+    pub fn propAt(start: *const Node, path: []const []const u8, comptime prop_tag: std.meta.Tag(Prop)) ?@FieldType(Prop, @tagName(prop_tag)) {
         var node: *const Node = start;
         var i: usize = 0;
         while (i < path.len) : (i += 1) {
@@ -30,7 +30,7 @@ pub const Node = struct {
         return null;
     }
 
-    pub fn prop(node: *const Node, comptime prop_tag: std.meta.Tag(Prop)) ?std.meta.TagPayload(Prop, prop_tag) {
+    pub fn prop(node: *const Node, comptime prop_tag: std.meta.Tag(Prop)) ?@FieldType(Prop, @tagName(prop_tag)) {
         for (node.props) |p| {
             if (p == prop_tag) {
                 return @field(p, @tagName(prop_tag));
@@ -268,7 +268,7 @@ pub const Prop = union(enum) {
             .DeviceType => |v| try writer.print("device_type: \"{s}\"", .{v}),
             .LinuxInitrdStart => |v| try writer.print("linux,initrd-start: 0x{x:0>2}", .{v}),
             .LinuxInitrdEnd => |v| try writer.print("linux,initrd-end: 0x{x:0>2}", .{v}),
-            .Unresolved => |_| try writer.writeAll("UNRESOLVED"),
+            .Unresolved => try writer.writeAll("UNRESOLVED"),
             .Unknown => |v| try writer.print("{f}: (unk {} bytes) <{f}>", .{ std.zig.fmtString(v.name), v.value.len, std.zig.fmtString(v.value) }),
         }
     }
@@ -282,7 +282,7 @@ pub const Prop = union(enum) {
             try this.format("", .{}, writer);
         }
 
-        pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.Options, writer: anytype) !void {
             _ = fmt;
             _ = options;
             if (this.freq / 1_000_000_000 > 0) {
@@ -305,7 +305,7 @@ pub const Prop = union(enum) {
             try this.format("", .{}, writer);
         }
 
-        pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        pub fn format(this: @This(), comptime fmt: []const u8, options: std.fmt.Options, writer: anytype) !void {
             _ = fmt;
             _ = options;
             try writer.writeByte('"');
@@ -433,7 +433,8 @@ test "parse" {
         try testing.expectEqualSlices(u32, &.{0x8000}, clocks[1]);
 
         // Make sure this works (and that the code gets compiled).
-        std.debug.print("{f}\n", .{qemu_arm64});
+        const f = try std.fmt.allocPrint(testing.allocator, "{f}", .{qemu_arm64});
+        defer testing.allocator.free(f);
     }
 
     {
@@ -483,8 +484,9 @@ test "parse" {
         try testing.expectEqualSlices(u32, &.{ 0x85, 0x53 }, clocks[0]);
         try testing.expectEqualSlices(u32, &.{ 0x85, 0x162 }, clocks[1]);
 
-        // Print it out.
-        std.debug.print("{f}\n", .{rockpro64});
+        // Make sure this works (and that the code gets compiled).
+        const f = try std.fmt.allocPrint(testing.allocator, "{f}", .{rockpro64});
+        defer testing.allocator.free(f);
     }
 
     {

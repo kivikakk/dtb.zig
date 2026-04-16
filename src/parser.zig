@@ -45,8 +45,8 @@ const Parser = struct {
     }
 
     fn handleNode(self: *Self, node_name: []const u8, root: ?*dtb.Node, parent: ?*dtb.Node) Error!*dtb.Node {
-        var props = std.ArrayList(dtb.Prop){};
-        var children = std.ArrayList(*dtb.Node){};
+        var props: std.ArrayList(dtb.Prop) = .empty;
+        var children: std.ArrayList(*dtb.Node) = .empty;
 
         errdefer {
             for (props.items) |p| {
@@ -267,7 +267,7 @@ fn resolveProp(allocator: std.mem.Allocator, root: *dtb.Node, current: *dtb.Node
         => |v| {
             const cs = try cells(allocator, v);
             defer allocator.free(cs);
-            var groups = std.ArrayList([]u32){};
+            var groups: std.ArrayList([]u32) = .empty;
             errdefer {
                 for (groups.items) |group| allocator.free(group);
                 groups.deinit(allocator);
