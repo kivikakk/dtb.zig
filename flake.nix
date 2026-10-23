@@ -2,12 +2,12 @@
   description = "dtb.zig development shell";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
     zig-overlay.url = "github:mitchellh/zig-overlay";
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-    zls-flake.url = "github:zigtools/zls/0.15.0";
+    zls-flake.url = "github:zigtools/zls/0.17.0";
     zls-flake.inputs.nixpkgs.follows = "nixpkgs";
     zls-flake.inputs.zig-overlay.follows = "zig-overlay";
   };
@@ -35,7 +35,7 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          zig = zig-overlay.packages.${system}."0.15.1";
+          zig = zig-overlay.packages.${system}."0.17.0";
           zls = zls-flake.packages.${system}.zls;
         in
         {

@@ -162,7 +162,7 @@ const Parser = struct {
         var list = try self.allocator.alloc(T, value.len / @sizeOf(T));
         var i: usize = 0;
         while (i < list.len) : (i += 1) {
-            list[i] = std.mem.bigToNative(T, @as(*const T, @ptrCast(@alignCast(value[i * @sizeOf(T) ..].ptr))).*);
+            list[i] = std.mem.readInt(T, value[i * @sizeOf(T)..][0..@sizeOf(T)], .big);
         }
         return list;
     }
